@@ -387,6 +387,7 @@ def add_head():
         db.commit(); db.close()
     return redirect(url_for("akhrajaat"))
 
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True, port=5000)
