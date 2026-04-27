@@ -82,6 +82,7 @@ def layout(title, page, body, user=""):
       <a href="/kharidari" class="{'on' if page=='kh' else ''}">📦 Kharidari</a>
       <a href="/akhrajaat" class="{'on' if page=='ex' else ''}">💸 Akhrajaat</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
+      <a href="/ledger" class="{'on' if page=='ldg' else ''}">💵 Cash & Bank</a>
       {admin_links}
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
@@ -158,6 +159,16 @@ def init_db():
     CREATE TABLE IF NOT EXISTS heads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         naam TEXT UNIQUE NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tarikh TEXT,
+        account TEXT,
+        qism TEXT,
+        tafseel TEXT,
+        rakam REAL,
+        darj_kiya TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
     if not db.execute("SELECT id FROM users WHERE username='admin'").fetchone():
@@ -714,6 +725,143 @@ def del_user(i):
     session.setdefault('_flashes',[]).append(("info","User delete ho gaya"))
     return redirect("/users")
 
+# ── CASH & BANK LEDGER ────────────────────────────────────────────────────────
+ACCOUNTS = ["Cash in Hand", "Bank (HBL/MCB)", "JazzCash", "EasyPaisa"]
+
+@app.route("/ledger", methods=["GET","POST"])
+@login_req
+def ledger():
+    db = get_db()
+    if request.method == "POST":
+        f = request.form
+        rakam = float(f.get("rakam") or 0)
+        if not rakam:
+            session.setdefault('_flashes',[]).append(("danger","Rakam zaroori hai"))
+            return redirect("/ledger")
+        db.execute("INSERT INTO ledger (tarikh,account,qism,tafseel,rakam,darj_kiya) VALUES (?,?,?,?,?,?)",
+            (f.get("tarikh") or today(), f.get("account","Cash in Hand"),
+             f.get("qism","Cash In"), f.get("tafseel",""),
+             rakam, session.get("naam","")))
+        db.commit()
+        session.setdefault('_flashes',[]).append(("success","Entry save ho gayi!"))
+        return redirect("/ledger")
+
+    acc_filter = request.args.get("acc","")
+    if acc_filter:
+        rows = db.execute("SELECT * FROM ledger WHERE account=? ORDER BY tarikh ASC, created_at ASC", (acc_filter,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM ledger ORDER BY tarikh ASC, created_at ASC").fetchall()
+
+    # balances per account
+    balances = {}
+    for acc in ACCOUNTS:
+        cash_in  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM ledger WHERE account=? AND qism IN ('Cash In','Opening Balance')",(acc,)).fetchone()[0]
+        cash_out = db.execute("SELECT COALESCE(SUM(rakam),0) FROM ledger WHERE account=? AND qism='Cash Out'",(acc,)).fetchone()[0]
+        balances[acc] = cash_in - cash_out
+
+    total_balance = sum(balances.values())
+    db.close()
+
+    # account filter buttons
+    acc_btns = f"<a href='/ledger' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px'>Sab</a>"
+    for acc in ACCOUNTS:
+        bal = balances[acc]
+        col = "#16A34A" if bal >= 0 else "#DC2626"
+        acc_btns += f"<a href='/ledger?acc={acc}' class='btn {'bp' if acc_filter==acc else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;border:1px solid #E2E8F0'>{acc}<br><span style='font-size:10px;color:{col}'>{pk(bal)}</span></a>"
+
+    # table rows with running balance
+    running = {}
+    trs = ""
+    if not rows:
+        trs = "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:16px'>Koi entry nahi — pehle Opening Balance add karein</td></tr>"
+    else:
+        for r in rows:
+            acc = r['account']
+            if acc not in running: running[acc] = 0
+            if r['qism'] in ('Cash In','Opening Balance'):
+                running[acc] += r['rakam']
+                sign = "+"
+                amt_col = "g"
+            else:
+                running[acc] -= r['rakam']
+                sign = "-"
+                amt_col = "r"
+            bal = running[acc]
+            bal_col = "#16A34A" if bal >= 0 else "#DC2626"
+            qism_badge = "bg-g" if r['qism'] in ('Cash In','Opening Balance') else "bg-r"
+            del_btn = f"<a href='/ledger/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a>" if session.get('role')=='admin' else ""
+            trs += f"""<tr>
+                <td>{r['tarikh']}</td>
+                <td><span class='badge bg-b'>{r['account']}</span></td>
+                <td><span class='badge {qism_badge}'>{r['qism']}</span></td>
+                <td>{r['tafseel'] or '—'}</td>
+                <td class='{amt_col}'><b>{sign} {pk(r['rakam'])}</b></td>
+                <td style='font-weight:700;color:{bal_col}'>{pk(bal)}</td>
+                <td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td>
+                <td>{del_btn}</td>
+            </tr>"""
+
+    acc_opts = "".join([f"<option>{a}</option>" for a in ACCOUNTS])
+
+    body = f"""{alerts()}
+    <div class="grid">
+      <div class="met"><div class="ml">Kul Balance (Sab)</div><div class="mv {'g' if total_balance>=0 else 'r'}">{pk(total_balance)}</div></div>
+      {''.join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {chr(103) if balances[acc]>=0 else chr(114)}">{pk(balances[acc])}</div></div>' for acc in ACCOUNTS])}
+    </div>
+
+    <div class="card"><div class="ct">Nai Entry Darj Karein</div>
+    <form method="POST" action="/ledger">
+    <div class="fgrid">
+      <div class="fg"><label>Account</label>
+        <select name="account">{acc_opts}</select>
+      </div>
+      <div class="fg"><label>Qism (Type)</label>
+        <select name="qism">
+          <option>Opening Balance</option>
+          <option>Cash In</option>
+          <option>Cash Out</option>
+        </select>
+      </div>
+      <div class="fg"><label>Rakam (PKR)</label>
+        <input name="rakam" type="number" step="0.01" placeholder="0" required>
+      </div>
+      <div class="fg"><label>Tafseel</label>
+        <input name="tafseel" placeholder="e.g. Courier se mila, Vendor ko diya">
+      </div>
+      <div class="fg"><label>Tarikh</label>
+        <input name="tarikh" type="date" id="dt">
+      </div>
+    </div>
+    <button class="btn bp" type="submit">✓ Darj Karein</button>
+    </form></div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="ct" style="margin:0">Cash & Bank Ledger</div>
+        <a href="/export/ledger" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
+      </div>
+      <div style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:4px">{acc_btns}</div>
+      <div class="tw"><table>
+        <thead><tr><th>Tarikh</th><th>Account</th><th>Qism</th><th>Tafseel</th><th>Rakam</th><th>Balance</th><th>Darj Kiya</th><th></th></tr></thead>
+        <tbody>{trs}</tbody>
+      </table></div>
+    </div>
+    <div style="background:#EFF6FF;border-radius:8px;padding:12px;font-size:12px;color:#1E40AF;margin-top:8px">
+      <b>Guide:</b> Opening Balance — shuru ka balance | Cash In — paisa aya | Cash Out — paisa gaya
+    </div>
+    <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
+    return layout("Cash & Bank Ledger", "ldg", body)
+
+@app.route("/ledger/del/<int:i>")
+@login_req
+@admin_req
+def del_ledger(i):
+    db = get_db()
+    db.execute("DELETE FROM ledger WHERE id=?", (i,))
+    db.commit(); db.close()
+    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
+    return redirect("/ledger")
+
 # ── EXPORT CSV ────────────────────────────────────────────────────────────────
 import csv, io
 from flask import Response
@@ -729,6 +877,19 @@ def make_csv(headers, rows):
         mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment"}
     )
+
+@app.route("/export/ledger")
+@login_req
+def export_ledger():
+    db = get_db()
+    rows = db.execute("SELECT tarikh,account,qism,tafseel,rakam,darj_kiya FROM ledger ORDER BY tarikh ASC, created_at ASC").fetchall()
+    db.close()
+    resp = make_csv(
+        ["Tarikh","Account","Qism","Tafseel","Rakam","Darj Kiya"],
+        [list(r) for r in rows]
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=cash_bank_ledger.csv"
+    return resp
 
 @app.route("/export/kharidari")
 @login_req
