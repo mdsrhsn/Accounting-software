@@ -83,6 +83,7 @@ def layout(title, page, body, user=""):
       <a href="/akhrajaat" class="{'on' if page=='ex' else ''}">💸 Akhrajaat</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/ledger" class="{'on' if page=='ldg' else ''}">💵 Cash & Bank</a>
+      <a href="/tracking" class="{'on' if page=='trk' else ''}" style="background:{'#1D4ED8' if page=='trk' else ''}">📡 Courier Tracking</a>
       {admin_links}
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
@@ -861,6 +862,256 @@ def del_ledger(i):
     db.commit(); db.close()
     session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
     return redirect("/ledger")
+
+# ── COURIER TRACKING API ──────────────────────────────────────────────────────
+import requests as req_lib
+from datetime import datetime, timedelta
+
+DAEWOO_BASE = "https://codapi.daewoo.net.pk/"
+DIGI_BASE   = "https://dev.digidokaan.pk/api/v1/digidokaan/"
+
+def get_daewoo_creds():
+    return (os.environ.get("DAEWOO_API_KEY",""),
+            os.environ.get("DAEWOO_API_USER",""),
+            os.environ.get("DAEWOO_API_PASS",""))
+
+def get_digi_token():
+    phone = os.environ.get("DIGI_PHONE","")
+    pwd   = os.environ.get("DIGI_PASS","")
+    if not phone or not pwd:
+        return None, "DigiDokaan credentials Railway pe set nahi"
+    try:
+        r = req_lib.post(DIGI_BASE+"auth/login",
+                        json={"phone": phone, "password": pwd}, timeout=10)
+        d = r.json()
+        if d.get("code") == 200:
+            return d.get("token"), None
+        return None, d.get("error","Login failed")
+    except Exception as e:
+        return None, str(e)
+
+def track_daewoo(track_no):
+    key, user, pwd = get_daewoo_creds()
+    if not key:
+        return None, "Daewoo API credentials Railway pe set nahi"
+    try:
+        url = f"{DAEWOO_BASE}api/booking/quickTrack?trackingNo={track_no}"
+        r = req_lib.get(url, timeout=10)
+        d = r.json()
+        if d.get("Result",{}).get("Success"):
+            return d["Result"], None
+        return None, "Tracking not found"
+    except Exception as e:
+        return None, str(e)
+
+def track_digi(track_no):
+    token, err = get_digi_token()
+    if err:
+        return None, err
+    try:
+        r = req_lib.post(DIGI_BASE+"get-order-tracking",
+                        json={"tracking_no": track_no},
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=10)
+        d = r.json()
+        if d.get("code") == 200:
+            return d, None
+        return None, d.get("error","Tracking not found")
+    except Exception as e:
+        return None, str(e)
+
+def get_digi_orders():
+    token, err = get_digi_token()
+    if err:
+        return [], err
+    try:
+        r = req_lib.post(DIGI_BASE+"get_shipper_advice_order",
+                        json={"source":"core_api","gateway_id":3},
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=10)
+        d = r.json()
+        return d.get("data",[]), None
+    except Exception as e:
+        return [], str(e)
+
+@app.route("/tracking", methods=["GET","POST"])
+@login_req
+def tracking():
+    result     = None
+    error      = None
+    track_no   = ""
+    courier_type = ""
+
+    if request.method == "POST":
+        track_no     = request.form.get("track_no","").strip()
+        courier_type = request.form.get("courier_type","daewoo")
+        if track_no:
+            if courier_type == "daewoo":
+                result, error = track_daewoo(track_no)
+            else:
+                result, error = track_digi(track_no)
+
+    # Build result HTML
+    result_html = ""
+    if error:
+        result_html = f"<div class='alert al-d'>Error: {error}</div>"
+    elif result and courier_type == "daewoo":
+        cur = result.get("CurrentTrackStatus",[])
+        det = result.get("TrackingDetails",[])
+        if cur:
+            c = cur[0]
+            status_col = "#16A34A" if "DELIVER" in str(c.get("status_name","")).upper() else "#D97706" if "ROUTE" in str(c.get("status_name","")).upper() else "#3B82F6"
+            result_html = f"""
+            <div class="card" style="border-left:4px solid {status_col}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div class="ct" style="margin:0">Daewoo — {track_no}</div>
+                <span style="background:{status_col};color:#fff;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600">{c.get('status_name','Unknown')}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+                <div class="met"><div class="ml">Customer</div><div style="font-size:13px;font-weight:600">{c.get('receiver_name','—')}</div></div>
+                <div class="met"><div class="ml">Contact</div><div style="font-size:13px;font-weight:600">{c.get('receiver_contact1','—')}</div></div>
+                <div class="met"><div class="ml">COD Amount</div><div style="font-size:13px;font-weight:600;color:#16A34A">Rs {c.get('amount_cod',0):,}</div></div>
+                <div class="met"><div class="ml">From</div><div style="font-size:13px">{c.get('source_terminal','—')}</div></div>
+                <div class="met"><div class="ml">To</div><div style="font-size:13px">{c.get('destination_terminal','—')}</div></div>
+                <div class="met"><div class="ml">Booking Date</div><div style="font-size:12px">{str(c.get('booking_date_time','—'))[:10]}</div></div>
+              </div>
+              <div class="ct">Tracking History</div>
+              <div class="tw"><table>
+                <thead><tr><th>Date</th><th>Status</th><th>Terminal</th><th>Remarks</th></tr></thead>
+                <tbody>{"".join([f'<tr><td>{d.get("Date","")}</td><td><span class="badge {"bg-g" if "DELIVER" in str(d.get("Status","")).upper() else "bg-w"}">{d.get("Status","")}</span></td><td>{d.get("TransactionTerminal","")}</td><td>{d.get("Rem","")}</td></tr>' for d in det])}</tbody>
+              </table></div>
+            </div>"""
+    elif result and courier_type == "digi":
+        data = result.get("data",[])
+        result_html = f"""
+        <div class="card" style="border-left:4px solid #3B82F6">
+          <div class="ct">DigiDokaan — {track_no}</div>
+          <div class="tw"><table>
+            <thead><tr><th>Date</th><th>Status</th><th>Details</th></tr></thead>
+            <tbody>{"".join([f'<tr><td>{str(d)[:20] if isinstance(d,str) else d.get("date","")}</td><td>{d.get("status","") if isinstance(d,dict) else ""}</td><td>{d.get("details","") if isinstance(d,dict) else str(d)}</td></tr>' for d in (data if data else [{"date":"—","status":"No history","details":""}])])}</tbody>
+          </table></div>
+        </div>"""
+
+    # Stuck parcels from DB
+    db = get_db()
+    all_courier = db.execute("SELECT * FROM courier ORDER BY created_at DESC").fetchall()
+    db.close()
+
+    stuck_html = ""
+    stuck_count = 0
+    total_co = len(all_courier)
+    tot_rec  = sum(float(r['mila'] or 0) for r in all_courier)
+    tot_net  = sum(float(r['net_rakam'] or 0) for r in all_courier)
+
+    # Check parcels with reference numbers for stuck alert
+    with_ref = [r for r in all_courier if r['reference']]
+    if with_ref:
+        stuck_rows = ""
+        for r in with_ref[-10:]:
+            days_ago = ""
+            try:
+                d = datetime.strptime(str(r['tarikh']), "%Y-%m-%d")
+                diff = (datetime.now() - d).days
+                if diff >= 3:
+                    stuck_count += 1
+                    color = "#DC2626" if diff >= 7 else "#D97706"
+                    stuck_rows += f"<tr><td>{r['tarikh']}</td><td><span class='badge bg-b'>{r['courier_naam']}</span></td><td>{r['reference']}</td><td style='color:{color};font-weight:600'>{diff} din</td><td>{pk(r['net_rakam'])}</td></tr>"
+            except: pass
+        if stuck_rows:
+            stuck_html = f"""
+            <div class="card" style="border-left:4px solid #DC2626;margin-bottom:14px">
+              <div class="ct" style="color:#DC2626">⚠️ Possible Stuck Parcels ({stuck_count})</div>
+              <div style="font-size:11px;color:#6B7280;margin-bottom:8px">3+ din purane records jin ka status unclear hai</div>
+              <div class="tw"><table>
+                <thead><tr><th>Tarikh</th><th>Courier</th><th>Reference</th><th>Kitne Din</th><th>Net Rakam</th></tr></thead>
+                <tbody>{stuck_rows}</tbody>
+              </table></div>
+            </div>"""
+
+    # API credentials status
+    creds_ok_daewoo = bool(os.environ.get("DAEWOO_API_KEY"))
+    creds_ok_digi   = bool(os.environ.get("DIGI_PHONE"))
+
+    cred_html = f"""
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;background:{'#DCFCE7' if creds_ok_daewoo else '#FEE2E2'};color:{'#166534' if creds_ok_daewoo else '#991B1B'}">
+        {'✓' if creds_ok_daewoo else '✗'} Daewoo API {'Connected' if creds_ok_daewoo else 'Not Set'}
+      </div>
+      <div style="padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;background:{'#DCFCE7' if creds_ok_digi else '#FEE2E2'};color:{'#166534' if creds_ok_digi else '#991B1B'}">
+        {'✓' if creds_ok_digi else '✗'} DigiDokaan API {'Connected' if creds_ok_digi else 'Not Set'}
+      </div>
+      <div style="padding:6px 12px;border-radius:7px;font-size:11px;color:#6B7280;background:#F1F5F9">
+        Railway → Variables mein API keys set karein
+      </div>
+    </div>"""
+
+    # Recent courier records from our DB
+    recent_html = ""
+    if all_courier:
+        recent_rows = "".join([f"""<tr>
+            <td>{r['tarikh']}</td>
+            <td><span class='badge bg-b'>{r['courier_naam']}</span></td>
+            <td>{r['qism']}</td>
+            <td>{r['parcel_tadaad'] or 0}</td>
+            <td class='g'><b>{pk(r['mila'])}</b></td>
+            <td class='r'>{pk(r['charges'])}</td>
+            <td><b>{pk(r['net_rakam'])}</b></td>
+            <td>{r['reference'] or '—'}</td>
+            <td>
+              {"<a href='/track_quick/daewoo/"+str(r['reference'])+"' class='btn' style='font-size:10px;padding:3px 8px;background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE'>Track</a>" if r['reference'] else ""}
+            </td>
+          </tr>""" for r in all_courier[:15]])
+        recent_html = f"""
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div class="ct" style="margin:0">Tamam Courier Records</div>
+            <div style="font-size:11px;color:#6B7280">{total_co} records | Kul Mila: {pk(tot_rec)} | Net: {pk(tot_net)}</div>
+          </div>
+          <div class="tw"><table>
+            <thead><tr><th>Tarikh</th><th>Courier</th><th>Qism</th><th>Parcels</th><th>Mila</th><th>Charges</th><th>Net</th><th>Reference</th><th>Track</th></tr></thead>
+            <tbody>{recent_rows}</tbody>
+          </table></div>
+        </div>"""
+
+    body = f"""{alerts()}
+    {cred_html}
+
+    <!-- SEARCH BOX -->
+    <div class="card" style="background:linear-gradient(135deg,#0F172A,#1E3A8A);border:none">
+      <div style="color:#fff;font-size:15px;font-weight:700;margin-bottom:4px">📡 Courier Tracking</div>
+      <div style="color:#93C5FD;font-size:12px;margin-bottom:14px">Tracking number daal ke real-time status dekhen</div>
+      <form method="POST" action="/tracking" style="display:flex;gap:8px;flex-wrap:wrap">
+        <input name="track_no" value="{track_no}" placeholder="Tracking number likhein..." 
+               style="flex:1;min-width:200px;padding:10px 14px;border:none;border-radius:8px;font-size:13px;background:#fff">
+        <select name="courier_type" style="padding:10px 14px;border:none;border-radius:8px;font-size:13px;background:#fff">
+          <option value="daewoo" {'selected' if courier_type=='daewoo' else ''}>🚛 Daewoo Express</option>
+          <option value="digi" {'selected' if courier_type=='digi' else ''}>📦 DigiDokaan</option>
+        </select>
+        <button class="btn bp" type="submit" style="padding:10px 20px;font-size:13px">🔍 Track Karein</button>
+      </form>
+    </div>
+
+    {result_html}
+    {stuck_html}
+
+    <!-- SUMMARY METRICS -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="met"><div class="ml">Kul Courier Records</div><div class="mv b">{total_co}</div></div>
+      <div class="met"><div class="ml">Kul Mila</div><div class="mv g">{pk(tot_rec)}</div></div>
+      <div class="met"><div class="ml">Net Income</div><div class="mv g">{pk(tot_net)}</div></div>
+      <div class="met"><div class="ml">Stuck Alert</div><div class="mv {'r' if stuck_count>0 else 'g'}">{stuck_count} parcels</div></div>
+    </div>
+
+    {recent_html}
+    """
+    return layout("📡 Courier Tracking", "trk", body)
+
+@app.route("/track_quick/<courier>/<ref>")
+@login_req
+def track_quick(courier, ref):
+    session['_track_no'] = ref
+    session['_courier']  = courier
+    return redirect(f"/tracking?auto=1&trk={ref}&c={courier}")
 
 # ── EXPORT CSV ────────────────────────────────────────────────────────────────
 import csv, io
