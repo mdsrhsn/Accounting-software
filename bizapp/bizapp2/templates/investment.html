@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% set page="inv" %}
+{% block title %}Investment{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="ct">Nai Investment Darj Karein</div>
+  <form method="POST">
+    <div class="fgrid">
+      <div class="fg"><label>Rakam (PKR)</label><input name="rakam" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Tafseel / Source</label><input name="tafseel" placeholder="e.g. Apni savings" required></div>
+      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
+    </div>
+    <button class="btn bs" type="submit">✓ Darj Karein</button>
+  </form>
+</div>
+<div class="card">
+  <div class="ct">Tamam Investment — Kul: <span class="g">{{total}}</span></div>
+  <div class="tw"><table>
+    <thead><tr><th>Tarikh</th><th>Tafseel</th><th>Rakam</th><th>Darj Kiya</th><th></th></tr></thead>
+    <tbody>{% for r in rows %}
+    <tr><td>{{r.tarikh}}</td><td>{{r.tafseel}}</td>
+    <td class="g" style="font-weight:600">Rs {{"{:,}".format(r.rakam|int)}}</td>
+    <td style="color:#9CA3AF;font-size:11px">{{r.darj_kiya}}</td>
+    <td><a href="/investment/del/{{r.id}}" class="btn bd" onclick="return confirm('Delete?')">Del</a></td>
+    </tr>{% else %}<tr><td colspan="5" style="text-align:center;color:#9CA3AF;padding:20px">Koi record nahi</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+<script>document.getElementById('dt').valueAsDate=new Date();</script>
+{% endblock %}

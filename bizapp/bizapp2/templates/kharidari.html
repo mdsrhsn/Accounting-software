@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% set page="kh" %}
+{% block title %}Kharidari (Purchases){% endblock %}
+{% block content %}
+<div class="card">
+  <div class="ct">Nai Kharidari Darj Karein</div>
+  <form method="POST">
+    <div class="fgrid">
+      <div class="fg"><label>Vendor ka Naam</label><input name="vendor" placeholder="Vendor ka naam" required></div>
+      <div class="fg"><label>Maal ka Naam</label><input name="maal" placeholder="Maal ka naam" required></div>
+      <div class="fg"><label>Quantity</label><input name="qty" type="number" step="0.01" value="1" id="qty" oninput="calc()"></div>
+      <div class="fg"><label>Unit</label>
+        <select name="unit">
+          <option>Dozen</option><option>Piece / Adad</option>
+          <option>Box</option><option>Kg</option><option>Man</option><option>Other</option>
+        </select>
+      </div>
+      <div class="fg"><label>Daam per Unit (PKR)</label><input name="daam" type="number" step="0.01" placeholder="0" id="daam" oninput="calc()"></div>
+      <div class="fg"><label>Payment Status</label>
+        <select name="status">
+          <option>Paid (Ada)</option><option>Unpaid (Baqi)</option><option>Partial (Adha)</option>
+        </select>
+      </div>
+      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
+      <div class="fg"><label>Notes</label><input name="notes" placeholder="Optional"></div>
+    </div>
+    <div class="kul" id="kul">Kul Rakam: Rs 0</div>
+    <button class="btn bp" type="submit">✓ Darj Karein</button>
+  </form>
+</div>
+<div class="metrics">
+  <div class="met"><div class="ml">Kul</div><div class="mv">{{total}}</div></div>
+  <div class="met"><div class="ml">Ada (Paid)</div><div class="mv g">{{ada}}</div></div>
+  <div class="met"><div class="ml">Baqi (Unpaid)</div><div class="mv r">{{baqi}}</div></div>
+</div>
+<div class="card">
+  <div class="ct">Tamam Kharidari Records</div>
+  <div class="tw"><table>
+    <thead><tr><th>Tarikh</th><th>Vendor</th><th>Maal</th><th>Qty</th><th>Unit</th><th>Daam</th><th>Kul Rakam</th><th>Status</th><th>Darj Kiya</th>{% if session.role=='admin' %}<th></th>{% endif %}</tr></thead>
+    <tbody>{% for r in rows %}
+    <tr>
+      <td>{{r.tarikh}}</td><td>{{r.vendor}}</td><td>{{r.maal}}</td>
+      <td>{{r.qty|int}}</td><td>{{r.unit}}</td>
+      <td>Rs {{"{:,}".format(r.daam|int)}}</td>
+      <td class="g" style="font-weight:600">Rs {{"{:,}".format(r.kul_rakam|int)}}</td>
+      <td><span class="badge {{'bg-g' if 'Paid' in r.status else 'bg-r' if 'Unpaid' in r.status else 'bg-w'}}">{{r.status}}</span></td>
+      <td style="color:#9CA3AF;font-size:11px">{{r.darj_kiya}}</td>
+      {% if session.role=='admin' %}<td><a href="/kharidari/del/{{r.id}}" class="btn bd" onclick="return confirm('Delete?')">Del</a></td>{% endif %}
+    </tr>{% else %}
+    <tr><td colspan="10" style="text-align:center;color:#9CA3AF;padding:20px">Koi record nahi</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+<script>
+document.getElementById('dt').valueAsDate = new Date();
+function calc(){
+  const q=parseFloat(document.getElementById('qty').value)||0;
+  const d=parseFloat(document.getElementById('daam').value)||0;
+  document.getElementById('kul').textContent='Kul Rakam: Rs '+Math.round(q*d).toLocaleString();
+}
+</script>
+{% endblock %}
