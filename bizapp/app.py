@@ -7,9 +7,9 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = "mudassar-biz-secret-2025-change-this"
 
-DB = "business.db"
+import tempfile
+DB = os.path.join(tempfile.gettempdir(), "business.db")
 
-# ── DATABASE ──────────────────────────────────────────────────────────────────
 def get_db():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
@@ -59,12 +59,10 @@ def init_db():
         naam TEXT UNIQUE NOT NULL
     );
     """)
-    # default admin
     existing = db.execute("SELECT id FROM users WHERE username='admin'").fetchone()
     if not existing:
         db.execute("INSERT INTO users (username,password,role,naam) VALUES (?,?,?,?)",
                    ("admin", generate_password_hash("admin123"), "admin", "Mudassar"))
-    # default heads
     heads = ["Rickshaw/Transport","Kiraya (Rent)","Tankhwah (Salary)",
              "Marketing & Ads","Bijli/Utility","Packing Material","Shipping",
              "Bank Charges","Aur Kharcha"]
@@ -94,7 +92,6 @@ def pk(n):
     try: return f"Rs {int(float(n)):,}"
     except: return "Rs 0"
 
-# ── AUTH ──────────────────────────────────────────────────────────────────────
 @app.route("/", methods=["GET","POST"])
 def login():
     if "user_id" in session: return redirect(url_for("dashboard"))
@@ -117,7 +114,6 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ── DASHBOARD ─────────────────────────────────────────────────────────────────
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -129,13 +125,11 @@ def dashboard():
     ln_taken  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Liya'").fetchone()[0]
     ln_wapas  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Wapas'").fetchone()[0]
     net_p     = net_co - total_pu - total_ex
-
     recent_pu = db.execute("SELECT * FROM kharidari ORDER BY created_at DESC LIMIT 6").fetchall()
     recent_co = db.execute("SELECT * FROM courier ORDER BY created_at DESC LIMIT 6").fetchall()
     m = datetime.now().strftime("%Y-%m")
     month_ex  = db.execute("SELECT * FROM akhrajaat WHERE tarikh LIKE ? ORDER BY created_at DESC LIMIT 6", (f"{m}%",)).fetchall()
     db.close()
-
     return render_template("dashboard.html",
         total_pu=pk(total_pu), total_ex=pk(total_ex),
         net_co=pk(net_co), total_inv=pk(total_inv),
@@ -143,7 +137,6 @@ def dashboard():
         net_p=pk(net_p), net_p_val=net_p,
         recent_pu=recent_pu, recent_co=recent_co, month_ex=month_ex)
 
-# ── KHARIDARI ────────────────────────────────────────────────────────────────
 @app.route("/kharidari", methods=["GET","POST"])
 @login_required
 def kharidari():
@@ -163,13 +156,12 @@ def kharidari():
         db.commit()
         flash("Kharidari save ho gayi!","success")
         return redirect(url_for("kharidari"))
-    rows = db.execute("SELECT * FROM kharidari ORDER BY created_at DESC").fetchall()
-    total     = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari").fetchone()[0]
-    ada       = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status='Paid (Ada)'").fetchone()[0]
-    baqi      = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status='Unpaid (Baqi)'").fetchone()[0]
+    rows  = db.execute("SELECT * FROM kharidari ORDER BY created_at DESC").fetchall()
+    total = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari").fetchone()[0]
+    ada   = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status='Paid (Ada)'").fetchone()[0]
+    baqi  = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status='Unpaid (Baqi)'").fetchone()[0]
     db.close()
-    return render_template("kharidari.html", rows=rows,
-                           total=pk(total), ada=pk(ada), baqi=pk(baqi))
+    return render_template("kharidari.html", rows=rows, total=pk(total), ada=pk(ada), baqi=pk(baqi))
 
 @app.route("/kharidari/delete/<int:rid>")
 @login_required
@@ -181,7 +173,6 @@ def del_kharidari(rid):
     flash("Record delete ho gaya","info")
     return redirect(url_for("kharidari"))
 
-# ── AKHRAJAAT ────────────────────────────────────────────────────────────────
 @app.route("/akhrajaat", methods=["GET","POST"])
 @login_required
 def akhrajaat():
@@ -217,7 +208,6 @@ def del_akhrajaat(rid):
     flash("Record delete ho gaya","info")
     return redirect(url_for("akhrajaat"))
 
-# ── COURIER ──────────────────────────────────────────────────────────────────
 @app.route("/courier", methods=["GET","POST"])
 @login_required
 def courier():
@@ -255,7 +245,6 @@ def del_courier(rid):
     flash("Record delete ho gaya","info")
     return redirect(url_for("courier"))
 
-# ── INVESTMENT ───────────────────────────────────────────────────────────────
 @app.route("/investment", methods=["GET","POST"])
 @login_required
 @admin_required
@@ -284,7 +273,6 @@ def del_investment(rid):
     flash("Record delete ho gaya","info")
     return redirect(url_for("investment"))
 
-# ── LOAN ─────────────────────────────────────────────────────────────────────
 @app.route("/loan", methods=["GET","POST"])
 @login_required
 @admin_required
@@ -316,7 +304,6 @@ def del_loan(rid):
     flash("Record delete ho gaya","info")
     return redirect(url_for("loan"))
 
-# ── P&L ──────────────────────────────────────────────────────────────────────
 @app.route("/pnl")
 @login_required
 @admin_required
@@ -341,7 +328,6 @@ def pnl():
         tot_inv=pk(tot_inv), liya=pk(liya), wapas=pk(wapas),
         baqi=pk(liya-wapas), head_rows=head_rows)
 
-# ── USERS (admin only) ───────────────────────────────────────────────────────
 @app.route("/users", methods=["GET","POST"])
 @login_required
 @admin_required
