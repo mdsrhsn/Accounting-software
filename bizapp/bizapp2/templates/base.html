@@ -1,5 +1,0 @@
-{% block heading %}{% endblock %}
-👤 {{ session.naam }}
-{% with msgs = get_flashed_messages(with_categories=true) %} {% for c,m in msgs %}
-{{m}}
-{% endfor %} {% endwith %} {% block content %}{% endblock %}
