@@ -255,6 +255,10 @@ def dashboard():
 
     body = f"""
     {alerts()}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:#6B7280">Tamam business ka overview</div>
+      <a href="/export/all" class="btn bs" style="font-size:12px">⬇ Poora Data Export (Excel)</a>
+    </div>
     <div class="grid">
       <div class="met"><div class="ml">Courier Amdani</div><div class="mv g">{pk(co)}</div></div>
       <div class="met"><div class="ml">Kul Kharidari</div><div class="mv r">{pk(pu)}</div></div>
@@ -327,7 +331,10 @@ def kharidari():
       <div class="met"><div class="ml">Ada</div><div class="mv g">{pk(ada)}</div></div>
       <div class="met"><div class="ml">Baqi</div><div class="mv r">{pk(baqi)}</div></div>
     </div>
-    <div class="card"><div class="ct">Tamam Kharidari</div><div class="tw"><table>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin:0">Tamam Kharidari</div>
+      <a href="/export/kharidari" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
+    </div><div class="tw"><table>
       <thead><tr><th>Tarikh</th><th>Vendor</th><th>Maal</th><th>Qty</th><th>Unit</th><th>Daam</th><th>Kul Rakam</th><th>Status</th><th>Darj Kiya</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
       <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();
@@ -396,7 +403,10 @@ def akhrajaat():
     <button class="btn bp" type="submit">✓ Darj Karein</button>
     </form>{add_head_form}</div>
     <div class="g2">
-    <div class="card"><div class="ct">Tamam Akhrajaat — Kul: <span class="r">{pk(total)}</span></div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin:0">Tamam Akhrajaat — Kul: <span class="r">{pk(total)}</span></div>
+      <a href="/export/akhrajaat" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
+    </div>
     <div class="tw"><table>
       <thead><tr><th>Tarikh</th><th>Head</th><th>Tafseel</th><th>Kise Diya</th><th>Rakam</th><th>Tariqa</th><th>Darj Kiya</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
       <tbody>{trs}</tbody></table></div></div>
@@ -480,7 +490,10 @@ def courier():
       <div class="met"><div class="ml">Kul Charges</div><div class="mv r">{pk(tc)}</div></div>
       <div class="met"><div class="ml">Net Rakam</div><div class="mv b">{pk(tm-tc)}</div></div>
     </div>
-    <div class="card"><div class="ct">Tamam Courier Records</div><div class="tw"><table>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin:0">Tamam Courier Records</div>
+      <a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
+    </div><div class="tw"><table>
       <thead><tr><th>Tarikh</th><th>Courier</th><th>Qism</th><th>Parcels</th><th>Mila</th><th>Charges</th><th>Net</th><th>Reference</th><th>Darj Kiya</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
       <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();
@@ -526,7 +539,10 @@ def investment():
     </div>
     <button class="btn bs" type="submit">✓ Darj Karein</button>
     </form></div>
-    <div class="card"><div class="ct">Tamam Investment — Kul: <span class="g">{pk(total)}</span></div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin:0">Tamam Investment — Kul: <span class="g">{pk(total)}</span></div>
+      <a href="/export/investment" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
+    </div>
     <div class="tw"><table><thead><tr><th>Tarikh</th><th>Tafseel</th><th>Rakam</th><th>Darj Kiya</th><th></th></tr></thead>
     <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
@@ -578,7 +594,10 @@ def loan():
       <div class="met"><div class="ml">Loan Wapas</div><div class="mv g">{pk(wapas)}</div></div>
       <div class="met"><div class="ml">Baqi</div><div class="mv w">{pk(liya-wapas)}</div></div>
     </div>
-    <div class="card"><div class="ct">Tamam Loan Records</div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="ct" style="margin:0">Tamam Loan Records</div>
+      <a href="/export/loan" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
+    </div>
     <div class="tw"><table><thead><tr><th>Tarikh</th><th>Shakhs</th><th>Qism</th><th>Rakam</th><th>Darj Kiya</th><th></th></tr></thead>
     <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
@@ -694,6 +713,135 @@ def del_user(i):
     db.commit(); db.close()
     session.setdefault('_flashes',[]).append(("info","User delete ho gaya"))
     return redirect("/users")
+
+# ── EXPORT CSV ────────────────────────────────────────────────────────────────
+import csv, io
+from flask import Response
+
+def make_csv(headers, rows):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    output.seek(0)
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment"}
+    )
+
+@app.route("/export/kharidari")
+@login_req
+def export_kharidari():
+    db = get_db()
+    rows = db.execute("SELECT tarikh,vendor,maal,qty,unit,daam,kul_rakam,status,notes,darj_kiya FROM kharidari ORDER BY created_at DESC").fetchall()
+    db.close()
+    resp = make_csv(
+        ["Tarikh","Vendor","Maal","Qty","Unit","Daam per Unit","Kul Rakam","Status","Notes","Darj Kiya"],
+        [list(r) for r in rows]
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=kharidari.csv"
+    return resp
+
+@app.route("/export/akhrajaat")
+@login_req
+def export_akhrajaat():
+    db = get_db()
+    rows = db.execute("SELECT tarikh,head,tafseel,kise_diya,rakam,tariqa,darj_kiya FROM akhrajaat ORDER BY created_at DESC").fetchall()
+    db.close()
+    resp = make_csv(
+        ["Tarikh","Head","Tafseel","Kise Diya","Rakam","Tariqa","Darj Kiya"],
+        [list(r) for r in rows]
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=akhrajaat.csv"
+    return resp
+
+@app.route("/export/courier")
+@login_req
+def export_courier():
+    db = get_db()
+    rows = db.execute("SELECT tarikh,courier_naam,qism,parcel_tadaad,mila,charges,net_rakam,reference,darj_kiya FROM courier ORDER BY created_at DESC").fetchall()
+    db.close()
+    resp = make_csv(
+        ["Tarikh","Courier","Qism","Parcel Tadaad","Mila","Charges","Net Rakam","Reference","Darj Kiya"],
+        [list(r) for r in rows]
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=courier.csv"
+    return resp
+
+@app.route("/export/investment")
+@login_req
+@admin_req
+def export_investment():
+    db = get_db()
+    rows = db.execute("SELECT tarikh,tafseel,rakam,darj_kiya FROM investment ORDER BY created_at DESC").fetchall()
+    db.close()
+    resp = make_csv(
+        ["Tarikh","Tafseel","Rakam","Darj Kiya"],
+        [list(r) for r in rows]
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=investment.csv"
+    return resp
+
+@app.route("/export/loan")
+@login_req
+@admin_req
+def export_loan():
+    db = get_db()
+    rows = db.execute("SELECT tarikh,shakhs,qism,rakam,darj_kiya FROM loan ORDER BY created_at DESC").fetchall()
+    db.close()
+    resp = make_csv(
+        ["Tarikh","Shakhs","Qism","Rakam","Darj Kiya"],
+        [list(r) for r in rows]
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=loan.csv"
+    return resp
+
+@app.route("/export/all")
+@login_req
+@admin_req
+def export_all():
+    db = get_db()
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(["=== KHARIDARI ==="])
+    writer.writerow(["Tarikh","Vendor","Maal","Qty","Unit","Daam","Kul Rakam","Status","Notes"])
+    for r in db.execute("SELECT tarikh,vendor,maal,qty,unit,daam,kul_rakam,status,notes FROM kharidari ORDER BY tarikh DESC").fetchall():
+        writer.writerow(list(r))
+
+    writer.writerow([])
+    writer.writerow(["=== AKHRAJAAT ==="])
+    writer.writerow(["Tarikh","Head","Tafseel","Kise Diya","Rakam","Tariqa"])
+    for r in db.execute("SELECT tarikh,head,tafseel,kise_diya,rakam,tariqa FROM akhrajaat ORDER BY tarikh DESC").fetchall():
+        writer.writerow(list(r))
+
+    writer.writerow([])
+    writer.writerow(["=== COURIER ==="])
+    writer.writerow(["Tarikh","Courier","Qism","Parcels","Mila","Charges","Net Rakam","Reference"])
+    for r in db.execute("SELECT tarikh,courier_naam,qism,parcel_tadaad,mila,charges,net_rakam,reference FROM courier ORDER BY tarikh DESC").fetchall():
+        writer.writerow(list(r))
+
+    writer.writerow([])
+    writer.writerow(["=== INVESTMENT ==="])
+    writer.writerow(["Tarikh","Tafseel","Rakam"])
+    for r in db.execute("SELECT tarikh,tafseel,rakam FROM investment ORDER BY tarikh DESC").fetchall():
+        writer.writerow(list(r))
+
+    writer.writerow([])
+    writer.writerow(["=== LOAN ==="])
+    writer.writerow(["Tarikh","Shakhs","Qism","Rakam"])
+    for r in db.execute("SELECT tarikh,shakhs,qism,rakam FROM loan ORDER BY tarikh DESC").fetchall():
+        writer.writerow(list(r))
+
+    db.close()
+    output.seek(0)
+    resp = Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8"
+    )
+    resp.headers["Content-Disposition"] = "attachment; filename=bizhisaab_poora_data.csv"
+    return resp
 
 # ── START ──────────────────────────────────────────────────────────────────────
 init_db()
