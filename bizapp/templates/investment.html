@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Investment{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title">Nai Investment Darj Karein</div>
+  <form method="POST">
+    <div class="form-grid">
+      <div class="form-group"><label>Rakam (PKR)</label><input name="rakam" type="number" step="0.01" placeholder="0" required></div>
+      <div class="form-group"><label>Tafseel / Source</label><input name="tafseel" placeholder="e.g. Apni savings" required></div>
+      <div class="form-group"><label>Tarikh</label><input name="tarikh" type="date" id="tarikh"></div>
+    </div>
+    <button class="btn btn-success" type="submit">✓ Darj Karein</button>
+  </form>
+</div>
+<div class="card">
+  <div class="card-title">Tamam Investment — Kul: <span class="g">{{ total }}</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tarikh</th><th>Tafseel</th><th>Rakam</th><th>Darj Kiya</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.tarikh }}</td><td>{{ r.tafseel }}</td>
+      <td class="g" style="font-weight:600">Rs {{ "{:,}".format(r.rakam|int) }}</td>
+      <td style="color:#6B7280;font-size:11px">{{ r.darj_kiya }}</td>
+      <td><a href="/investment/delete/{{ r.id }}" class="btn btn-danger btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+    </tr>
+    {% else %}<tr><td colspan="5" style="text-align:center;color:#9CA3AF;padding:20px">Koi record nahi</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+<script>document.getElementById('tarikh').valueAsDate=new Date();</script>
+{% endblock %}

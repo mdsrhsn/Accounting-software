@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}P&L Report{% endblock %}
+{% block content %}
+<div class="card" style="max-width:680px">
+  <div class="card-title" style="font-size:15px">Munafa / Nuksan — P&L Report (Tamam Waqt)</div>
+
+  <div class="pnl-section">AMDANI — Courier se Mila</div>
+  <div class="pnl-row"><span>Courier se Mila (Total)</span><span class="g" style="font-weight:600">{{ tot_rec }}</span></div>
+  <div class="pnl-row"><span style="padding-left:16px;color:#6B7280">Courier Charges Kate</span><span class="r">({{ tot_chg }})</span></div>
+  <div class="pnl-row total"><span>Net Amdani</span><span class="g">{{ net_co }}</span></div>
+
+  <div class="pnl-section">KHARIDARI (Lagat)</div>
+  <div class="pnl-row"><span>Vendor se Kharidari (Ada ki hui)</span><span class="r">({{ tot_pu }})</span></div>
+  <div class="pnl-row total"><span>Gross Munafa</span><span class="{{ 'g' if gross_p_val>=0 else 'r' }}">{{ gross_p }}</span></div>
+
+  <div class="pnl-section">AKHRAJAAT — Head Wise</div>
+  {% for r in head_rows %}
+  <div class="pnl-row"><span style="padding-left:16px">{{ r.head }}</span><span class="r">(Rs {{ "{:,}".format(r.tot|int) }})</span></div>
+  {% endfor %}
+  <div class="pnl-row total"><span>Kul Akhrajaat</span><span class="r">({{ tot_ex }})</span></div>
+
+  <div class="pnl-row grand">
+    <span>NET MUNAFA / NUKSAN</span>
+    <span class="{{ 'g' if net_p_val>=0 else 'r' }}" style="font-size:18px">{{ net_p }}</span>
+  </div>
+
+  <div class="pnl-section">CAPITAL & LOAN</div>
+  <div class="pnl-row"><span>Apni Investment</span><span class="b">{{ tot_inv }}</span></div>
+  <div class="pnl-row"><span>Loan Liya</span><span class="r">{{ liya }}</span></div>
+  <div class="pnl-row"><span>Loan Wapas Kiya</span><span class="g">{{ wapas }}</span></div>
+  <div class="pnl-row total"><span>Baqi Loan (Outstanding)</span><span class="w">{{ baqi }}</span></div>
+</div>
+{% endblock %}

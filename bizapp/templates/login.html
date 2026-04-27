@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ur"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BizHisaab — Login</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0F172A;min-height:100vh;
+     display:flex;align-items:center;justify-content:center}
+.box{background:#fff;border-radius:14px;padding:40px 36px;width:360px;max-width:95vw}
+.brand{text-align:center;font-size:22px;font-weight:800;color:#0F172A;margin-bottom:6px}
+.brand span{color:#3B82F6}
+.sub{text-align:center;font-size:12px;color:#6B7280;margin-bottom:28px}
+label{display:block;font-size:12px;color:#374151;font-weight:600;margin-bottom:4px}
+input{width:100%;padding:10px 12px;border:1px solid #E2E8F0;border-radius:8px;
+      font-size:14px;margin-bottom:16px;transition:border .2s}
+input:focus{outline:none;border-color:#3B82F6}
+.btn{width:100%;padding:11px;background:#3B82F6;color:#fff;border:none;
+     border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:.2s}
+.btn:hover{background:#2563EB}
+.alert{background:#FEE2E2;color:#991B1B;padding:10px;border-radius:7px;
+       font-size:12px;margin-bottom:14px;border:1px solid #FECACA}
+.footer{text-align:center;margin-top:18px;font-size:11px;color:#9CA3AF}
+</style></head><body>
+<div class="box">
+  <div class="brand">📊 <span>Biz</span>Hisaab</div>
+  <div class="sub">Business Accounting System</div>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat,msg in messages %}<div class="alert">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+  <form method="POST">
+    <label>Username</label>
+    <input type="text" name="username" placeholder="apna username" required autofocus>
+    <label>Password</label>
+    <input type="password" name="password" placeholder="password" required>
+    <button class="btn" type="submit">Login Karein</button>
+  </form>
+  <div class="footer">Default: admin / admin123</div>
+</div>
+</body></html>

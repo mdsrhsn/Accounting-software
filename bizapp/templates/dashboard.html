@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="metrics">
+  <div class="metric"><div class="metric-label">Courier Amdani (Net)</div><div class="metric-value g">{{ net_co }}</div></div>
+  <div class="metric"><div class="metric-label">Kul Kharidari</div><div class="metric-value r">{{ total_pu }}</div></div>
+  <div class="metric"><div class="metric-label">Kul Akhrajaat</div><div class="metric-value r">{{ total_ex }}</div></div>
+  <div class="metric"><div class="metric-label">Net Faida / Nuksan</div>
+    <div class="metric-value {{ 'g' if net_p_val >= 0 else 'r' }}">{{ net_p }}</div></div>
+  <div class="metric"><div class="metric-label">Apni Investment</div><div class="metric-value b">{{ total_inv }}</div></div>
+  <div class="metric"><div class="metric-label">Baqi Loan</div><div class="metric-value w">{{ baqi_loan }}</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+<div class="card">
+  <div class="card-title">Akhri Kharidari</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tarikh</th><th>Vendor</th><th>Maal</th><th>Qty</th><th>Unit</th><th>Kul Rakam</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in recent_pu %}
+    <tr>
+      <td>{{ r.tarikh }}</td><td>{{ r.vendor }}</td><td>{{ r.maal }}</td>
+      <td>{{ r.qty }}</td><td>{{ r.unit }}</td>
+      <td class="g" style="font-weight:600">Rs {{ "{:,}".format(r.kul_rakam|int) }}</td>
+      <td><span class="badge {{ 'badge-success' if 'Paid' in r.status else 'badge-danger' if 'Unpaid' in r.status else 'badge-warning' }}">{{ r.status }}</span></td>
+    </tr>
+    {% else %}<tr><td colspan="7" style="text-align:center;color:#9CA3AF;padding:16px">Koi data nahi</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <div class="card-title">Akhri Courier Payments</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tarikh</th><th>Courier</th><th>Qism</th><th>Net Rakam</th></tr></thead>
+    <tbody>
+    {% for r in recent_co %}
+    <tr>
+      <td>{{ r.tarikh }}</td>
+      <td><span class="badge badge-info">{{ r.courier }}</span></td>
+      <td>{{ r.qism }}</td>
+      <td class="g" style="font-weight:600">Rs {{ "{:,}".format(r.net_rakam|int) }}</td>
+    </tr>
+    {% else %}<tr><td colspan="4" style="text-align:center;color:#9CA3AF;padding:16px">Koi data nahi</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+</div>
+
+<div class="card">
+  <div class="card-title">Is Maheene ke Akhrajaat</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tarikh</th><th>Head</th><th>Tafseel</th><th>Kise Diya</th><th>Rakam</th></tr></thead>
+    <tbody>
+    {% for r in month_ex %}
+    <tr>
+      <td>{{ r.tarikh }}</td>
+      <td><span class="badge badge-warning">{{ r.head }}</span></td>
+      <td>{{ r.tafseel }}</td><td>{{ r.kise_diya or '—' }}</td>
+      <td class="r" style="font-weight:600">Rs {{ "{:,}".format(r.rakam|int) }}</td>
+    </tr>
+    {% else %}<tr><td colspan="5" style="text-align:center;color:#9CA3AF;padding:16px">Is maheene koi kharcha nahi</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

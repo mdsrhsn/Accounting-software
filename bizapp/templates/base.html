@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ur" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BizHisaab — {% block title %}{% endblock %}</title>
+<style>
+:root{
+  --bg:#F0F4F8;--card:#fff;--sidebar:#0F172A;--sidebar-txt:#94A3B8;
+  --active:#3B82F6;--accent:#3B82F6;--success:#16A34A;--danger:#DC2626;
+  --warning:#D97706;--text:#111827;--text2:#6B7280;--border:#E2E8F0;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+a{text-decoration:none;color:inherit}
+
+/* SIDEBAR */
+.sidebar{width:220px;background:var(--sidebar);display:flex;flex-direction:column;min-height:100vh;flex-shrink:0}
+.sidebar-brand{padding:20px 16px;color:#fff;font-size:16px;font-weight:700;border-bottom:1px solid #1e293b}
+.sidebar-brand span{color:var(--active)}
+.nav-link{display:flex;align-items:center;gap:10px;padding:11px 18px;color:var(--sidebar-txt);font-size:13px;transition:.15s}
+.nav-link:hover,.nav-link.active{background:var(--active);color:#fff}
+.nav-link .ico{font-size:15px;width:20px;text-align:center}
+.sidebar-footer{margin-top:auto;padding:14px 16px;font-size:11px;color:#475569}
+.sidebar-user{font-weight:600;color:#94a3b8}
+
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{background:#fff;border-bottom:1px solid var(--border);padding:0 24px;height:54px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:15px;font-weight:600}
+.topbar-right{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text2)}
+.content{padding:20px 24px;flex:1}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)}
+
+/* METRICS */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+.metric{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.metric-label{font-size:11px;color:var(--text2);margin-bottom:4px}
+.metric-value{font-size:20px;font-weight:700}
+.g{color:var(--success)}.r{color:var(--danger)}.b{color:var(--accent)}.w{color:var(--warning)}
+
+/* FORM */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
+.form-group label{display:block;font-size:11px;color:var(--text2);margin-bottom:4px;font-weight:500}
+.form-group input,.form-group select,.form-group textarea{
+  width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;
+  font-size:13px;font-family:inherit;background:#fff;color:var(--text);
+  transition:border-color .2s}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:var(--accent)}
+.kul-display{font-size:16px;font-weight:700;color:var(--accent);padding:8px 0}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:7px;
+     font-size:13px;font-weight:600;cursor:pointer;border:none;transition:.15s}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:#2563eb}
+.btn-success{background:var(--success);color:#fff}
+.btn-danger{background:var(--danger);color:#fff;padding:5px 12px;font-size:12px}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-warning{background:var(--warning);color:#fff}
+
+/* TABLE */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#F8FAFC;padding:9px 10px;text-align:left;font-weight:600;
+   color:var(--text2);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #F1F5F9;color:var(--text)}
+tr:hover td{background:#F8FAFC}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600}
+.badge-success{background:#DCFCE7;color:#166534}
+.badge-danger{background:#FEE2E2;color:#991B1B}
+.badge-warning{background:#FEF3C7;color:#92400E}
+.badge-info{background:#DBEAFE;color:#1E40AF}
+
+/* ALERTS */
+.alert{padding:10px 16px;border-radius:8px;margin-bottom:14px;font-size:13px;font-weight:500}
+.alert-success{background:#DCFCE7;color:#166534;border:1px solid #BBF7D0}
+.alert-danger{background:#FEE2E2;color:#991B1B;border:1px solid #FECACA}
+.alert-info{background:#DBEAFE;color:#1E40AF;border:1px solid #BFDBFE}
+
+/* MOBILE */
+@media(max-width:768px){
+  .sidebar{display:none}
+  .content{padding:14px}
+  .metrics{grid-template-columns:1fr 1fr}
+  .form-grid{grid-template-columns:1fr}
+  .topbar h1{font-size:13px}
+}
+
+/* PNL */
+.pnl-section{background:#EFF6FF;border-left:3px solid var(--accent);
+             padding:6px 12px;margin:10px 0 4px;font-size:12px;
+             font-weight:600;color:#1E40AF;border-radius:0 6px 6px 0}
+.pnl-row{display:flex;justify-content:space-between;padding:6px 8px;
+         border-bottom:1px solid #F1F5F9;font-size:13px}
+.pnl-row.total{font-weight:700;background:#F8FAFC}
+.pnl-row.grand{font-size:15px;font-weight:700;background:#EFF6FF;
+               border-radius:6px;padding:10px 12px;margin-top:8px}
+</style>
+</head>
+<body>
+{% if session.user_id %}
+<nav class="sidebar">
+  <div class="sidebar-brand">📊 <span>Biz</span>Hisaab</div>
+  <a href="/dashboard" class="nav-link {% if request.path=='/dashboard' %}active{% endif %}"><span class="ico">🏠</span> Dashboard</a>
+  <a href="/kharidari" class="nav-link {% if '/kharidari' in request.path %}active{% endif %}"><span class="ico">📦</span> Kharidari</a>
+  <a href="/akhrajaat" class="nav-link {% if '/akhrajaat' in request.path %}active{% endif %}"><span class="ico">💸</span> Akhrajaat</a>
+  <a href="/courier"   class="nav-link {% if '/courier' in request.path %}active{% endif %}"><span class="ico">🚚</span> Courier</a>
+  {% if session.role=='admin' %}
+  <a href="/investment" class="nav-link {% if '/investment' in request.path %}active{% endif %}"><span class="ico">💰</span> Investment</a>
+  <a href="/loan"       class="nav-link {% if '/loan' in request.path %}active{% endif %}"><span class="ico">🏦</span> Loan</a>
+  <a href="/pnl"        class="nav-link {% if '/pnl' in request.path %}active{% endif %}"><span class="ico">📊</span> P&L Report</a>
+  <a href="/users"      class="nav-link {% if '/users' in request.path %}active{% endif %}"><span class="ico">👥</span> Users</a>
+  {% endif %}
+  <div class="sidebar-footer">
+    <div class="sidebar-user">{{ session.naam }}</div>
+    <div style="margin-top:2px">{{ session.role }}</div>
+    <a href="/logout" style="color:#EF4444;font-size:11px;margin-top:8px;display:block">Logout</a>
+  </div>
+</nav>
+{% endif %}
+<div class="main">
+  {% if session.user_id %}
+  <div class="topbar">
+    <h1>{% block title %}{% endblock %}</h1>
+    <div class="topbar-right">
+      <span>👤 {{ session.naam }}</span>
+      <a href="/logout" style="color:var(--danger)">Logout</a>
+    </div>
+  </div>
+  {% endif %}
+  <div class="content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat,msg in messages %}
+        <div class="alert alert-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </div>
+</div>
+</body>
+</html>
