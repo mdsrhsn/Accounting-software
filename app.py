@@ -1124,17 +1124,27 @@ def adspend():
         if currency == "USD":
             dollar_amt  = float(f.get("dollar_amount") or 0)
             dollar_rate = float(f.get("dollar_rate") or 0)
+            billed_d    = float(f.get("billed_pkr") or dollar_amt)  # billed dollars
             pkr_amt     = round(dollar_amt * dollar_rate, 2)
-            # Tax = difference between billed amount and charged amount
-            billed_pkr  = float(f.get("billed_pkr") or pkr_amt)
-            tax_amt     = round(billed_pkr - pkr_amt, 2)
-            total_pkr   = billed_pkr
+            tax_amt     = round((billed_d - dollar_amt) * dollar_rate, 2)
+            total_pkr   = round(billed_d * dollar_rate, 2)
         else:
-            dollar_amt  = 0
-            dollar_rate = 0
-            pkr_amt     = float(f.get("pkr_amount") or 0)
-            tax_amt     = float(f.get("tax_amount") or 0)
-            total_pkr   = round(pkr_amt + tax_amt, 2)
+            pkr_type = f.get("pkr_type","dollar")
+            if pkr_type == "dollar":
+                # PKR account but dollar purchase
+                dollar_amt  = float(f.get("dollar_amount") or 0)
+                dollar_rate = float(f.get("dollar_rate") or 0)    # purchase rate
+                bill_rate   = float(f.get("billed_pkr") or 0)     # actual bill rate
+                pkr_amt     = round(dollar_amt * bill_rate, 2)     # actual paid
+                tax_amt     = round(dollar_amt * (dollar_rate - bill_rate), 2)  # difference
+                total_pkr   = round(dollar_amt * dollar_rate, 2)   # total cost
+            else:
+                # Direct PKR
+                dollar_amt  = 0
+                dollar_rate = 0
+                pkr_amt     = float(f.get("pkr_amount_direct") or 0)
+                tax_amt     = float(f.get("tax_amount_direct") or 0)
+                total_pkr   = round(pkr_amt + tax_amt, 2)
 
         qry(conn,"""INSERT INTO ad_spend
             (date,ad_account_id,ad_account_name,platform,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by)
@@ -1292,25 +1302,57 @@ def adspend():
       <div class="fg"><label>Description</label><input name="description" placeholder="Campaign details"></div>
     </div>
 
-    <!-- USD fields -->
-    <div id="usd_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 Dollar Account</div>
+    <!-- PKR Account — Dollar Purchase -->
+    <div id="pkr_usd_fields" style="display:none;background:#EFF6FF;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:#1E40AF;margin-bottom:8px">💳 PKR Account — Dollar Purchase</div>
       <div class="fgrid">
-        <div class="fg"><label>Dollar Amount Spent ($)</label><input name="dollar_amount" type="number" step="0.01" placeholder="0.00" id="d_amt" oninput="calcUSD()"></div>
-        <div class="fg"><label>Dollar Rate (1$=?PKR)</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 293.5" id="d_rate" oninput="calcUSD()"></div>
-        <div class="fg"><label>Actual PKR Charged (bill pe)</label><input name="billed_pkr" type="number" step="0.01" placeholder="Actual amount charged" id="d_billed" oninput="calcUSD()"></div>
-        <div class="fg"><label>Tax (auto)</label><input id="d_tax" readonly style="background:#F8FAFC;color:#D97706" placeholder="Auto calculated"></div>
+        <div class="fg"><label>Dollar Amount Purchased ($)</label><input name="dollar_amount" type="number" step="0.01" placeholder="e.g. 100" id="pk_damt" oninput="calcPKR_USD()"></div>
+        <div class="fg"><label>Rate Jis Pe Dollar Kharida (1$=?PKR)</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 293.5" id="pk_drate" oninput="calcPKR_USD()"></div>
+        <div class="fg"><label>Actual Rate Jis Pe Bill Kata (1$=?PKR)</label><input name="billed_pkr" type="number" step="0.01" placeholder="e.g. 272" id="pk_brate" oninput="calcPKR_USD()"></div>
       </div>
-      <div class="calc-info"><span>Dollar: <b id="d_show">$0</b></span><span>Rate: <b id="r_show">0</b></span><span>Base PKR: <b id="p_show">Rs 0</b></span><span>Tax: <b id="t_show" style="color:#D97706">Rs 0</b></span><span>Total: <b id="tot_show" style="color:#DC2626">Rs 0</b></span></div>
+      <div class="calc-info">
+        <span>Purchase Cost: <b id="pk_pcost">Rs 0</b></span>
+        <span>Bill Amount: <b id="pk_bcost">Rs 0</b></span>
+        <span>Tax (Difference): <b id="pk_tax" style="color:#D97706">Rs 0</b></span>
+        <span>Total: <b id="pk_tot" style="color:#DC2626">Rs 0</b></span>
+      </div>
+      <input type="hidden" name="pkr_amount" id="pk_amt_hidden">
+      <input type="hidden" name="tax_amount" id="pk_tax_hidden">
     </div>
 
-    <!-- PKR fields -->
-    <div id="pkr_fields">
+    <!-- PKR Account — Direct PKR -->
+    <div id="pkr_direct_fields" style="display:none;background:#F0FDF4;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:#166534;margin-bottom:8px">💚 PKR Account — Direct Payment</div>
       <div class="fgrid">
-        <div class="fg"><label>Amount (PKR)</label><input name="pkr_amount" type="number" step="0.01" placeholder="0" id="p_amt" oninput="calcPKR()"></div>
-        <div class="fg"><label>Tax Amount (PKR)</label><input name="tax_amount" type="number" step="0.01" placeholder="0" id="p_tax" oninput="calcPKR()"></div>
-        <div class="fg"><label>Total (auto)</label><input id="p_tot" readonly style="background:#F8FAFC;color:#DC2626" placeholder="Auto calculated"></div>
+        <div class="fg"><label>Amount (PKR)</label><input name="pkr_amount_direct" type="number" step="0.01" placeholder="0" id="pd_amt" oninput="calcPKR_Direct()"></div>
+        <div class="fg"><label>Tax (PKR)</label><input name="tax_amount_direct" type="number" step="0.01" placeholder="0" id="pd_tax" oninput="calcPKR_Direct()"></div>
+        <div class="fg"><label>Total (auto)</label><input id="pd_tot" readonly style="background:#F8FAFC;color:#DC2626" placeholder="Auto calculated"></div>
       </div>
+    </div>
+
+    <!-- USD Account -->
+    <div id="usd_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 USD Account</div>
+      <div class="fgrid">
+        <div class="fg"><label>Dollar Spend (actual, e.g. $100)</label><input name="dollar_amount" type="number" step="0.01" placeholder="e.g. 100" id="u_spend" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Billed (jo kata, e.g. $102)</label><input name="billed_pkr" type="number" step="0.01" placeholder="e.g. 102" id="u_billed" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Rate (1$=?PKR)</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 280" id="u_rate" oninput="calcUSD()"></div>
+      </div>
+      <div class="calc-info">
+        <span>Spend: <b id="u_s">$0</b></span>
+        <span>Billed: <b id="u_b">$0</b></span>
+        <span>Tax: <b id="u_t" style="color:#D97706">$0 = Rs 0</b></span>
+        <span>Total PKR: <b id="u_tot" style="color:#DC2626">Rs 0</b></span>
+      </div>
+      <input type="hidden" name="pkr_amount" id="u_amt_hidden">
+      <input type="hidden" name="tax_amount" id="u_tax_hidden">
+    </div>
+
+    <!-- PKR type selector for PKR accounts -->
+    <div id="pkr_type_sel" style="display:none;margin-bottom:10px">
+      <label style="font-size:11px;color:#6B7280;font-weight:600">Payment Type:</label>
+      <label style="margin-left:12px;font-size:12px"><input type="radio" name="pkr_type" value="dollar" checked onchange="showPKRType()"> Dollar Purchase kiya tha</label>
+      <label style="margin-left:12px;font-size:12px"><input type="radio" name="pkr_type" value="direct" onchange="showPKRType()"> Direct PKR payment</label>
     </div>
 
     <button class="btn bp" type="submit">✓ Save Ad Spend</button>
@@ -1335,37 +1377,72 @@ def adspend():
     document.getElementById('dt').valueAsDate=new Date();
     var accCurrency = {{{",".join([f'"{a["id"]}":"{a["currency"]}"' for a in ad_accounts])}}};
     var accSite = {{{",".join([f'"{a["id"]}":"{a["site"]}"' for a in ad_accounts])}}};
+
     function onAccChange(sel){{
       var id = sel.value;
       var curr = accCurrency[id] || 'PKR';
       var site = accSite[id] || '';
       document.getElementById('site_inp').value = site;
+      document.getElementById('pkr_usd_fields').style.display='none';
+      document.getElementById('pkr_direct_fields').style.display='none';
+      document.getElementById('usd_fields').style.display='none';
+      document.getElementById('pkr_type_sel').style.display='none';
       if(curr==='USD'){{
         document.getElementById('usd_fields').style.display='block';
-        document.getElementById('pkr_fields').style.display='none';
       }} else {{
-        document.getElementById('usd_fields').style.display='none';
-        document.getElementById('pkr_fields').style.display='block';
+        document.getElementById('pkr_type_sel').style.display='block';
+        showPKRType();
       }}
     }}
+
+    function showPKRType(){{
+      var type = document.querySelector('input[name="pkr_type"]:checked').value;
+      if(type==='dollar'){{
+        document.getElementById('pkr_usd_fields').style.display='block';
+        document.getElementById('pkr_direct_fields').style.display='none';
+      }} else {{
+        document.getElementById('pkr_usd_fields').style.display='none';
+        document.getElementById('pkr_direct_fields').style.display='block';
+      }}
+    }}
+
+    function calcPKR_USD(){{
+      var damt  = parseFloat(document.getElementById('pk_damt').value)||0;
+      var drate = parseFloat(document.getElementById('pk_drate').value)||0;
+      var brate = parseFloat(document.getElementById('pk_brate').value)||0;
+      var purchase = Math.round(damt * drate);
+      var bill     = Math.round(damt * brate);
+      var tax      = purchase - bill; // purchase rate - actual rate = tax/difference
+      var total    = purchase; // total aapne kitna diya dollar khareedne mein
+      document.getElementById('pk_pcost').textContent = 'Rs '+purchase.toLocaleString();
+      document.getElementById('pk_bcost').textContent = 'Rs '+bill.toLocaleString();
+      document.getElementById('pk_tax').textContent   = 'Rs '+Math.abs(tax).toLocaleString();
+      document.getElementById('pk_tot').textContent   = 'Rs '+total.toLocaleString();
+      document.getElementById('pk_amt_hidden').value  = bill;
+      document.getElementById('pk_tax_hidden').value  = Math.abs(tax);
+    }}
+
+    function calcPKR_Direct(){{
+      var p = parseFloat(document.getElementById('pd_amt').value)||0;
+      var t = parseFloat(document.getElementById('pd_tax').value)||0;
+      document.getElementById('pd_tot').value = 'Rs '+Math.round(p+t).toLocaleString();
+    }}
+
     function calcUSD(){{
-      var d=parseFloat(document.getElementById('d_amt').value)||0;
-      var r=parseFloat(document.getElementById('d_rate').value)||0;
-      var b=parseFloat(document.getElementById('d_billed').value)||0;
-      var base=Math.round(d*r);
-      var tax=Math.round(b-base);
-      document.getElementById('d_tax').value='Rs '+tax.toLocaleString();
-      document.getElementById('d_show').textContent='$'+d.toLocaleString();
-      document.getElementById('r_show').textContent=r;
-      document.getElementById('p_show').textContent='Rs '+base.toLocaleString();
-      document.getElementById('t_show').textContent='Rs '+tax.toLocaleString();
-      document.getElementById('tot_show').textContent='Rs '+Math.round(b).toLocaleString();
+      var spend  = parseFloat(document.getElementById('u_spend').value)||0;
+      var billed = parseFloat(document.getElementById('u_billed').value)||0;
+      var rate   = parseFloat(document.getElementById('u_rate').value)||0;
+      var tax_d  = billed - spend;
+      var tax_pkr= Math.round(tax_d * rate);
+      var tot_pkr= Math.round(billed * rate);
+      document.getElementById('u_s').textContent   = '$'+spend.toLocaleString();
+      document.getElementById('u_b').textContent   = '$'+billed.toLocaleString();
+      document.getElementById('u_t').textContent   = '$'+tax_d.toFixed(2)+' = Rs '+tax_pkr.toLocaleString();
+      document.getElementById('u_tot').textContent = 'Rs '+tot_pkr.toLocaleString();
+      document.getElementById('u_amt_hidden').value  = Math.round(spend*rate);
+      document.getElementById('u_tax_hidden').value  = tax_pkr;
     }}
-    function calcPKR(){{
-      var p=parseFloat(document.getElementById('p_amt').value)||0;
-      var t=parseFloat(document.getElementById('p_tax').value)||0;
-      document.getElementById('p_tot').value='Rs '+Math.round(p+t).toLocaleString();
-    }}
+
     onAccChange(document.getElementById('acc_sel'));
     </script>"""
     return layout("Ad Spend","ads",body)
