@@ -166,59 +166,22 @@ def get_db():
     return conn
 
 def init_db():
-    db = get_db()
     if USE_PG:
-        cur = db.cursor()
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT DEFAULT 'employee',
-            naam TEXT
-        );
-        CREATE TABLE IF NOT EXISTS purchases (
-            id SERIAL PRIMARY KEY,
-            date TEXT, vendor TEXT, product TEXT,
-            quantity REAL, unit TEXT,
-            total_amount REAL, per_unit_price REAL,
-            status TEXT, notes TEXT, added_by TEXT,
-            created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS expenses (
-            id SERIAL PRIMARY KEY,
-            date TEXT, category TEXT, description TEXT,
-            paid_to TEXT, amount REAL, payment_method TEXT,
-            added_by TEXT, created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS courier (
-            id SERIAL PRIMARY KEY,
-            date TEXT, courier_name TEXT, type TEXT,
-            parcels REAL, total_cod REAL, charges REAL,
-            net_amount REAL, reference TEXT, added_by TEXT,
-            created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS investment (
-            id SERIAL PRIMARY KEY,
-            date TEXT, description TEXT, amount REAL,
-            added_by TEXT, created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS loans (
-            id SERIAL PRIMARY KEY,
-            date TEXT, person TEXT, type TEXT, amount REAL,
-            added_by TEXT, created_at TIMESTAMP DEFAULT NOW()
-        );
-        CREATE TABLE IF NOT EXISTS exp_categories (
-            id SERIAL PRIMARY KEY,
-            name TEXT UNIQUE NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS cashbank (
-            id SERIAL PRIMARY KEY,
-            date TEXT, account TEXT, type TEXT,
-            description TEXT, amount REAL,
-            added_by TEXT, created_at TIMESTAMP DEFAULT NOW()
-        );
-        """)
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        tables = [
+            """CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT 'employee', naam TEXT)""",
+            """CREATE TABLE IF NOT EXISTS purchases (id SERIAL PRIMARY KEY, date TEXT, vendor TEXT, product TEXT, quantity REAL, unit TEXT, total_amount REAL, per_unit_price REAL, status TEXT, notes TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+            """CREATE TABLE IF NOT EXISTS expenses (id SERIAL PRIMARY KEY, date TEXT, category TEXT, description TEXT, paid_to TEXT, amount REAL, payment_method TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+            """CREATE TABLE IF NOT EXISTS courier (id SERIAL PRIMARY KEY, date TEXT, courier_name TEXT, type TEXT, parcels REAL, total_cod REAL, charges REAL, net_amount REAL, reference TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+            """CREATE TABLE IF NOT EXISTS investment (id SERIAL PRIMARY KEY, date TEXT, description TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+            """CREATE TABLE IF NOT EXISTS loans (id SERIAL PRIMARY KEY, date TEXT, person TEXT, type TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+            """CREATE TABLE IF NOT EXISTS exp_categories (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS cashbank (id SERIAL PRIMARY KEY, date TEXT, account TEXT, type TEXT, description TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+        ]
+        for t in tables:
+            cur.execute(t)
         cur.execute("SELECT id FROM users WHERE username='admin'")
         if not cur.fetchone():
             cur.execute("INSERT INTO users (username,password,role,naam) VALUES (%s,%s,%s,%s)",
@@ -227,67 +190,29 @@ def init_db():
                   "Utilities","Packaging","Shipping","Bank Charges","Miscellaneous"]:
             try: cur.execute("INSERT INTO exp_categories (name) VALUES (%s) ON CONFLICT DO NOTHING", (c,))
             except: pass
-        db.commit()
+        conn.commit()
+        conn.close()
     else:
-        db.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT DEFAULT 'employee',
-            naam TEXT
-        );
-        CREATE TABLE IF NOT EXISTS purchases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, vendor TEXT, product TEXT,
-            quantity REAL, unit TEXT,
-            total_amount REAL, per_unit_price REAL,
-            status TEXT, notes TEXT, added_by TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, category TEXT, description TEXT,
-            paid_to TEXT, amount REAL, payment_method TEXT,
-            added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS courier (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, courier_name TEXT, type TEXT,
-            parcels REAL, total_cod REAL, charges REAL,
-            net_amount REAL, reference TEXT, added_by TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS investment (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, description TEXT, amount REAL,
-            added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS loans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, person TEXT, type TEXT, amount REAL,
-            added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS exp_categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS cashbank (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, account TEXT, type TEXT,
-            description TEXT, amount REAL,
-            added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
+        conn = sqlite3.connect(DB)
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT 'employee', naam TEXT);
+        CREATE TABLE IF NOT EXISTS purchases (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, vendor TEXT, product TEXT, quantity REAL, unit TEXT, total_amount REAL, per_unit_price REAL, status TEXT, notes TEXT, added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, category TEXT, description TEXT, paid_to TEXT, amount REAL, payment_method TEXT, added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS courier (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, courier_name TEXT, type TEXT, parcels REAL, total_cod REAL, charges REAL, net_amount REAL, reference TEXT, added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS investment (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, description TEXT, amount REAL, added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, person TEXT, type TEXT, amount REAL, added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS exp_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL);
+        CREATE TABLE IF NOT EXISTS cashbank (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, account TEXT, type TEXT, description TEXT, amount REAL, added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         """)
-        if not db.execute("SELECT id FROM users WHERE username='admin'").fetchone():
-            db.execute("INSERT INTO users (username,password,role,naam) VALUES (?,?,?,?)",
+        if not conn.execute("SELECT id FROM users WHERE username='admin'").fetchone():
+            conn.execute("INSERT INTO users (username,password,role,naam) VALUES (?,?,?,?)",
                 ("admin", generate_password_hash("admin123"), "admin", "Mudassar"))
         for c in ["Transport/Rickshaw","Rent","Salaries","Marketing & Ads",
                   "Utilities","Packaging","Shipping","Bank Charges","Miscellaneous"]:
-            try: db.execute("INSERT INTO exp_categories (name) VALUES (?)", (c,))
+            try: conn.execute("INSERT INTO exp_categories (name) VALUES (?)", (c,))
             except: pass
-        db.commit()
-    db.close()
+        conn.commit()
+        conn.close()
 
 def login_req(f):
     @wraps(f)
