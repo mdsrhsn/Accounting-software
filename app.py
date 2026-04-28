@@ -10,11 +10,16 @@ DB = os.path.join(tempfile.gettempdir(), "biz.db")
 
 # ── DATABASE SETUP ────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-USE_PG = bool(DATABASE_URL)
+USE_PG = DATABASE_URL.startswith("postgresql") or DATABASE_URL.startswith("postgres")
 
-if USE_PG:
+try:
     import psycopg2
     import psycopg2.extras
+    PSYCOPG2_OK = True
+except:
+    PSYCOPG2_OK = False
+
+USE_PG = USE_PG and PSYCOPG2_OK
 
 def get_db():
     if USE_PG:
@@ -227,6 +232,15 @@ def admin_req(f):
     return dec
 
 # ── LOGIN ─────────────────────────────────────────────────────────────────────
+@app.route("/debug")
+def debug():
+    return f"""
+    DATABASE_URL set: {bool(os.environ.get('DATABASE_URL'))}
+    USE_PG: {USE_PG}
+    PSYCOPG2_OK: {PSYCOPG2_OK}
+    DB URL starts with: {os.environ.get('DATABASE_URL','')[:20]}...
+    """
+
 @app.route("/", methods=["GET","POST"])
 def login():
     if "uid" in session: return redirect("/dashboard")
