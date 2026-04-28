@@ -123,6 +123,21 @@ def init_db():
     conn.commit()
     conn.close()
 
+def is_admin():
+    return session.get("role") == "admin"
+
+def hide_amt(amount_html):
+    """Hide amount for employees"""
+    if is_admin():
+        return amount_html
+    return "<span style='color:#9CA3AF;font-size:11px'>—</span>"
+
+def hide_pk(n):
+    """Show amount only to admin"""
+    if is_admin():
+        return pk(n)
+    return "—"
+
 def login_req(f):
     @wraps(f)
     def dec(*a, **kw):
@@ -155,6 +170,8 @@ def layout(title, page, body):
     admin_links = ""
     if session.get("role") == "admin":
         admin_links = f"""
+        <a href="/adspend" class="{'on' if page=='ads' else ''}">📣 Ad Spend</a>
+        <a href="/cashbank" class="{'on' if page=='cb' else ''}">💵 Cash & Bank</a>
         <a href="/investment" class="{'on' if page=='inv' else ''}">💰 Investment</a>
         <a href="/loan" class="{'on' if page=='ln' else ''}">🏦 Loans</a>
         <a href="/pnl" class="{'on' if page=='pnl' else ''}">📊 P&L Report</a>
@@ -169,9 +186,7 @@ def layout(title, page, body):
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
       <a href="/purchases" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
       <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
-      <a href="/adspend" class="{'on' if page=='ads' else ''}">📣 Ad Spend</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
-      <a href="/cashbank" class="{'on' if page=='cb' else ''}">💵 Cash & Bank</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
       {admin_links}
       <div class="sb-foot">
@@ -247,33 +262,33 @@ def dashboard():
     rex = qry(conn,"SELECT * FROM expenses ORDER BY created_at DESC LIMIT 5").fetchall()
     conn.close()
 
-    pu_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td><td class='g'><b>{pk(r['total_amount'])}</b></td><td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-    co_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td><td>{r['type']}</td><td class='g'><b>{pk(r['net_amount'])}</b></td></tr>" for r in rco]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-    ex_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td><td>{r['description']}</td><td class='r'><b>{pk(r['amount'])}</b></td></tr>" for r in rex]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    pu_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>{'<td class=\"g\"><b>'+pk(r['total_amount'])+'</b></td>' if is_admin() else ''}<td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    co_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td><td>{r['type']}</td>{'<td class=\"g\"><b>'+pk(r['net_amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rco]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    ex_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td><td>{r['description']}</td>{'<td class=\"r\"><b>'+pk(r['amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rex]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
     body = f"""{flashes()}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:12px;color:#6B7280">Business Overview</div>
-      <a href="/export/all" class="btn bs" style="font-size:12px">⬇ Export All Data</a>
+      {f'<a href="/export/all" class="btn bs" style="font-size:12px">⬇ Export All Data</a>' if is_admin() else ''}
     </div>
-    <div class="grid">
+    {f'''<div class="grid">
       <div class="met"><div class="ml">Courier Income</div><div class="mv g">{pk(co)}</div></div>
       <div class="met"><div class="ml">Total Purchases</div><div class="mv r">{pk(pu)}</div></div>
       <div class="met"><div class="ml">Total Expenses</div><div class="mv r">{pk(ex)}</div></div>
-      <div class="met"><div class="ml">Net Profit/Loss</div><div class="mv {'g' if net>=0 else 'r'}">{pk(net)}</div></div>
+      <div class="met"><div class="ml">Net Profit/Loss</div><div class="mv {"g" if net>=0 else "r"}">{pk(net)}</div></div>
       <div class="met"><div class="ml">Investment</div><div class="mv b">{pk(inv)}</div></div>
       <div class="met"><div class="ml">Outstanding Loan</div><div class="mv w">{pk(float(ll)-float(lw))}</div></div>
-    </div>
+    </div>''' if is_admin() else '<div class="card" style="background:#EFF6FF;border:none"><div style="font-size:13px;color:#1E40AF;padding:8px">👋 Welcome! Use sidebar to add Purchases, Expenses, Courier or Ad Spend.</div></div>'}
     <div class="g2">
       <div class="card"><div class="ct">Recent Purchases</div><div class="tw"><table>
-        <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th><th>Amount</th><th>Status</th></tr></thead>
+        <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th>{f'<th>Amount</th>' if is_admin() else ''}<th>Status</th></tr></thead>
         <tbody>{pu_rows}</tbody></table></div></div>
       <div class="card"><div class="ct">Recent Courier</div><div class="tw"><table>
-        <thead><tr><th>Date</th><th>Courier</th><th>Type</th><th>Net Amount</th></tr></thead>
+        <thead><tr><th>Date</th><th>Courier</th><th>Type</th>{f'<th>Net Amount</th>' if is_admin() else ''}</tr></thead>
         <tbody>{co_rows}</tbody></table></div></div>
     </div>
     <div class="card"><div class="ct">Recent Expenses</div><div class="tw"><table>
-      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th>{f'<th>Amount</th>' if is_admin() else ''}</tr></thead>
       <tbody>{ex_rows}</tbody></table></div></div>"""
     return layout("Dashboard","dash",body)
 
@@ -299,14 +314,13 @@ def purchases():
     unpaid = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status='Unpaid'").fetchone()["v"] or 0
     conn.close()
 
-    trs = "".join([f"""<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td>
-        <td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>
-        <td class='b'><b>{pk(r['per_unit_price'])}</b></td>
-        <td class='g'><b>{pk(r['total_amount'])}</b></td>
-        <td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td>
-        <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
-        {'<td><a href="/purchases/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
-        </tr>""" for r in rows]) or "<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    pur_rows_list = []
+    for r in rows:
+        amt_cols = f"<td class='b'><b>{pk(r['per_unit_price'])}</b></td><td class='g'><b>{pk(r['total_amount'])}</b></td>"
+        del_btn = ("<td><a href='/purchases/del/" + str(r["id"]) + "' class='btn bd' onclick='return confirm(chr(39)+chr(68)+chr(101)+chr(108)+chr(101)+chr(116)+chr(101)+chr(63)+chr(39))'>Del</a></td>") if is_admin() else ""
+        badge = "bg-g" if r['status']=='Paid' else "bg-r" if r['status']=='Unpaid' else "bg-w"
+        pur_rows_list.append(f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>{amt_cols}<td><span class='badge {badge}'>{r['status']}</span></td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>{del_btn}</tr>")
+    trs = "".join(pur_rows_list) or "<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
     body = f"""{flashes()}
     <div class="card"><div class="ct">Add New Purchase</div>
@@ -333,7 +347,7 @@ def purchases():
       <div class="ct" style="margin:0">All Purchases</div>
       <a href="/export/purchases" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
     </div><div class="tw"><table>
-      <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th><th>Per Unit</th><th>Total</th><th>Status</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+      <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th><th>Per Unit</th><th>Total</th><th>Status</th><th>Added By</th>{"<th></th>" if is_admin() else ""}</tr></thead>
       <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();
     function calc(){{var q=parseFloat(document.getElementById('qty').value)||0;var t=parseFloat(document.getElementById('tot').value)||0;
@@ -403,7 +417,7 @@ def expenses():
     <div class="g2">
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="ct" style="margin:0">All Expenses — Total: <span class="r">{pk(total)}</span></div>
-      <a href="/export/expenses" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      {f'<a href="/export/expenses" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>' if is_admin() else ''}
     </div><div class="tw"><table>
       <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid To</th><th>Amount</th><th>Method</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
       <tbody>{trs}</tbody></table></div></div>
@@ -509,7 +523,7 @@ def courier():
 
     body = f"""{flashes()}
 
-    <!-- ACCOUNT SUMMARY CARDS -->
+    {'' if not is_admin() else ''}<!-- ACCOUNT SUMMARY CARDS -->
     <div style="margin-bottom:6px;font-size:11px;font-weight:600;color:#6B7280">Account-wise Summary (click to filter)</div>
     <div class="grid" style="margin-bottom:14px">{acc_cards}</div>
 
@@ -548,17 +562,17 @@ def courier():
     </form>''' if session.get('role')=='admin' else ''}
     </div>
 
-    <div class="grid" style="margin-bottom:14px">
-      <div class="met"><div class="ml">{'Account: '+acc_filter if acc_filter else 'All Accounts'}</div><div class="mv" style="font-size:13px;color:#6B7280">Filter Active</div></div>
+{f'''<div class="grid" style="margin-bottom:14px">
+      <div class="met"><div class="ml">{"Account: "+acc_filter if acc_filter else "All Accounts"}</div><div class="mv" style="font-size:13px;color:#6B7280">Filter Active</div></div>
       <div class="met"><div class="ml">Total COD</div><div class="mv g">{pk(t_cod)}</div></div>
       <div class="met"><div class="ml">Total Charges</div><div class="mv r">{pk(t_chg)}</div></div>
       <div class="met"><div class="ml">Net Amount</div><div class="mv b">{pk(float(t_cod)-float(t_chg))}</div></div>
-    </div>
+    </div>''' if is_admin() else ''}
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div class="ct" style="margin:0">Courier Records</div>
-        <a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+        {f'<a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>' if is_admin() else ''}
       </div>
       <div style="margin-bottom:10px;display:flex;flex-wrap:wrap">{acc_btns}</div>
       <div class="tw"><table>
@@ -701,6 +715,7 @@ def del_loan(i):
 # ── CASH & BANK ───────────────────────────────────────────────────────────────
 @app.route("/cashbank", methods=["GET","POST"])
 @login_req
+@admin_req
 def cashbank():
     conn = get_db()
     if request.method == "POST":
@@ -992,8 +1007,7 @@ def tracking():
     {result_html}
     <div class="grid" style="margin-bottom:14px">
       <div class="met"><div class="ml">Total Records</div><div class="mv b">{tot_cnt}</div></div>
-      <div class="met"><div class="ml">Total COD</div><div class="mv g">{pk(tot_cod)}</div></div>
-      <div class="met"><div class="ml">Net Income</div><div class="mv g">{pk(tot_net)}</div></div>
+      {f'<div class="met"><div class="ml">Total COD</div><div class="mv g">{pk(tot_cod)}</div></div><div class="met"><div class="ml">Net Income</div><div class="mv g">{pk(tot_net)}</div></div>' if is_admin() else ''}
     </div>
     <div class="card"><div class="ct">Courier Records</div>
     <div class="tw"><table><thead><tr><th>Date</th><th>Courier</th><th>Type</th><th>Parcels</th><th>Total COD</th><th>Charges</th><th>Net</th><th>Reference</th></tr></thead>
@@ -1108,6 +1122,7 @@ def import_data():
 # ── AD SPEND ──────────────────────────────────────────────────────────────────
 @app.route("/adspend", methods=["GET","POST"])
 @login_req
+@admin_req
 def adspend():
     conn = get_db()
     ad_accounts = qry(conn,"SELECT * FROM ad_accounts WHERE active=TRUE ORDER BY platform,name").fetchall()
@@ -1363,8 +1378,8 @@ def adspend():
     <!-- RECORDS TABLE -->
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div class="ct" style="margin:0">Ad Spend Records — Total: <span class="r">{pk(total_pkr)}</span> | Tax: <span style="color:#D97706">{pk(total_tax)}</span></div>
-        <a href="/export/adspend" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+        <div class="ct" style="margin:0">Ad Spend Records{f' — Total: <span class="r">{pk(total_pkr)}</span> | Tax: <span style="color:#D97706">{pk(total_tax)}</span>' if is_admin() else ''}</div>
+        {f'<a href="/export/adspend" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>' if is_admin() else ''}
       </div>
       <div style="margin-bottom:10px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
         <span style="font-size:11px;color:#6B7280;margin-right:4px">Platform:</span>{plat_btns}
