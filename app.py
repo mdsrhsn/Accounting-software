@@ -1,27 +1,26 @@
-from flask import Flask, request, redirect, session, flash
+from flask import Flask, request, redirect, session, Response
 from werkzeug.security import generate_password_hash, check_password_hash
-import sqlite3, os, tempfile
-from datetime import date
+import sqlite3, os, tempfile, csv, io
+from datetime import date, datetime
 from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = "bizhisaab2025secret"
 DB = os.path.join(tempfile.gettempdir(), "biz.db")
 
-# ── HTML HELPERS ──────────────────────────────────────────────────────────────
 CSS = """
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',sans-serif}
 body{background:#F1F5F9;display:flex;min-height:100vh}
 a{text-decoration:none;color:inherit}
-.sb{width:200px;background:#0F172A;display:flex;flex-direction:column;min-height:100vh;flex-shrink:0;position:fixed;top:0;left:0;height:100%}
+.sb{width:210px;background:#0F172A;display:flex;flex-direction:column;min-height:100vh;flex-shrink:0;position:fixed;top:0;left:0;height:100%;overflow-y:auto}
 .sb-brand{padding:16px;color:#fff;font-size:14px;font-weight:700;border-bottom:1px solid #1e293b}
 .sb-brand span{color:#3B82F6}
 .sb a{display:block;padding:10px 16px;color:#94A3B8;font-size:12px;transition:.15s}
 .sb a:hover,.sb a.on{background:#3B82F6;color:#fff}
 .sb-foot{margin-top:auto;padding:12px 16px;font-size:11px;color:#475569;border-top:1px solid #1e293b}
 .sb-foot a{color:#EF4444;display:block;margin-top:6px}
-.main{margin-left:200px;flex:1;display:flex;flex-direction:column}
+.main{margin-left:210px;flex:1;display:flex;flex-direction:column}
 .topbar{background:#fff;border-bottom:1px solid #E2E8F0;padding:0 20px;height:50px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
 .topbar h1{font-size:14px;font-weight:600}
 .con{padding:16px 20px}
@@ -41,6 +40,7 @@ a{text-decoration:none;color:inherit}
 .bs{background:#16A34A;color:#fff}
 .bd{background:#DC2626;color:#fff;padding:4px 9px;font-size:11px}
 .kul{font-size:14px;font-weight:700;color:#3B82F6;padding:5px 0;margin-bottom:8px}
+.calc-info{background:#EFF6FF;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#1E40AF;display:flex;gap:16px;flex-wrap:wrap}
 table{width:100%;border-collapse:collapse;font-size:11px}
 th{background:#F8FAFC;padding:7px 9px;text-align:left;font-weight:600;color:#6B7280;border-bottom:1px solid #E2E8F0;white-space:nowrap}
 td{padding:7px 9px;border-bottom:1px solid #F1F5F9;color:#111827}
@@ -64,13 +64,14 @@ tr:hover td{background:#F8FAFC}
 </style>
 """
 
-def layout(title, page, body, user=""):
+def layout(title, page, body):
     admin_links = ""
     if session.get("role") == "admin":
         admin_links = f"""
         <a href="/investment" class="{'on' if page=='inv' else ''}">💰 Investment</a>
-        <a href="/loan" class="{'on' if page=='ln' else ''}">🏦 Loan</a>
+        <a href="/loan" class="{'on' if page=='ln' else ''}">🏦 Loans</a>
         <a href="/pnl" class="{'on' if page=='pnl' else ''}">📊 P&L Report</a>
+        <a href="/import" class="{'on' if page=='imp' else ''}">⬆ Import Data</a>
         <a href="/users" class="{'on' if page=='usr' else ''}">👥 Users</a>
         """
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -79,11 +80,11 @@ def layout(title, page, body, user=""):
     <nav class="sb">
       <div class="sb-brand">📊 <span>Biz</span>Hisaab</div>
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
-      <a href="/kharidari" class="{'on' if page=='kh' else ''}">📦 Kharidari</a>
-      <a href="/akhrajaat" class="{'on' if page=='ex' else ''}">💸 Akhrajaat</a>
+      <a href="/purchases" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
+      <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
-      <a href="/ledger" class="{'on' if page=='ldg' else ''}">💵 Cash & Bank</a>
-      <a href="/tracking" class="{'on' if page=='trk' else ''}" style="background:{'#1D4ED8' if page=='trk' else ''}">📡 Courier Tracking</a>
+      <a href="/cashbank" class="{'on' if page=='cb' else ''}">💵 Cash & Bank</a>
+      <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
       {admin_links}
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
@@ -97,11 +98,11 @@ def layout(title, page, body, user=""):
     </div>
     </body></html>"""
 
-def alerts():
+def flashes():
     msgs = session.pop('_flashes', [])
     html = ""
     for cat, msg in msgs:
-        cl = "al-s" if cat == "success" else "al-d" if cat == "danger" else "al-i"
+        cl = "al-s" if cat=="success" else "al-d" if cat=="danger" else "al-i"
         html += f'<div class="alert {cl}">{msg}</div>'
     return html
 
@@ -111,7 +112,6 @@ def pk(n):
 
 def today(): return str(date.today())
 
-# ── DATABASE ──────────────────────────────────────────────────────────────────
 def get_db():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
@@ -127,60 +127,56 @@ def init_db():
         role TEXT DEFAULT 'employee',
         naam TEXT
     );
-    CREATE TABLE IF NOT EXISTS kharidari (
+    CREATE TABLE IF NOT EXISTS purchases (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tarikh TEXT, vendor TEXT, maal TEXT,
-        qty REAL, unit TEXT, daam REAL, kul_rakam REAL,
-        status TEXT, notes TEXT, darj_kiya TEXT,
+        date TEXT, vendor TEXT, product TEXT,
+        quantity REAL, unit TEXT,
+        total_amount REAL, per_unit_price REAL,
+        status TEXT, notes TEXT, added_by TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE IF NOT EXISTS akhrajaat (
+    CREATE TABLE IF NOT EXISTS expenses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tarikh TEXT, head TEXT, tafseel TEXT,
-        kise_diya TEXT, rakam REAL, tariqa TEXT,
-        darj_kiya TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        date TEXT, category TEXT, description TEXT,
+        paid_to TEXT, amount REAL, payment_method TEXT,
+        added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS courier (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tarikh TEXT, courier_naam TEXT, qism TEXT,
-        parcel_tadaad REAL, mila REAL, charges REAL,
-        net_rakam REAL, reference TEXT, darj_kiya TEXT,
+        date TEXT, courier_name TEXT, type TEXT,
+        parcels REAL, total_cod REAL, charges REAL,
+        net_amount REAL, reference TEXT, added_by TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS investment (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tarikh TEXT, tafseel TEXT, rakam REAL,
-        darj_kiya TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        date TEXT, description TEXT, amount REAL,
+        added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE IF NOT EXISTS loan (
+    CREATE TABLE IF NOT EXISTS loans (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tarikh TEXT, shakhs TEXT, qism TEXT, rakam REAL,
-        darj_kiya TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        date TEXT, person TEXT, type TEXT, amount REAL,
+        added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE IF NOT EXISTS heads (
+    CREATE TABLE IF NOT EXISTS exp_categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        naam TEXT UNIQUE NOT NULL
+        name TEXT UNIQUE NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS ledger (
+    CREATE TABLE IF NOT EXISTS cashbank (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tarikh TEXT,
-        account TEXT,
-        qism TEXT,
-        tafseel TEXT,
-        rakam REAL,
-        darj_kiya TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        date TEXT, account TEXT, type TEXT,
+        description TEXT, amount REAL,
+        added_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
     if not db.execute("SELECT id FROM users WHERE username='admin'").fetchone():
         db.execute("INSERT INTO users (username,password,role,naam) VALUES (?,?,?,?)",
             ("admin", generate_password_hash("admin123"), "admin", "Mudassar"))
-    for h in ["Rickshaw/Transport","Kiraya","Tankhwah","Marketing & Ads",
-              "Bijli/Utility","Packing","Shipping","Bank Charges","Aur Kharcha"]:
-        try: db.execute("INSERT INTO heads (naam) VALUES (?)", (h,))
+    for c in ["Transport/Rickshaw","Rent","Salaries","Marketing & Ads",
+              "Utilities","Packaging","Shipping","Bank Charges","Miscellaneous"]:
+        try: db.execute("INSERT INTO exp_categories (name) VALUES (?)", (c,))
         except: pass
-    db.commit()
-    db.close()
+    db.commit(); db.close()
 
 def login_req(f):
     @wraps(f)
@@ -193,12 +189,12 @@ def admin_req(f):
     @wraps(f)
     def dec(*a, **kw):
         if session.get("role") != "admin":
-            session.setdefault('_flashes', []).append(("danger", "Sirf admin access hai"))
+            session.setdefault('_flashes',[]).append(("danger","Admin access only"))
             return redirect("/dashboard")
         return f(*a, **kw)
     return dec
 
-# ── AUTH ──────────────────────────────────────────────────────────────────────
+# ── LOGIN ─────────────────────────────────────────────────────────────────────
 @app.route("/", methods=["GET","POST"])
 def login():
     if "uid" in session: return redirect("/dashboard")
@@ -208,14 +204,14 @@ def login():
         u = db.execute("SELECT * FROM users WHERE username=?", (request.form.get("username",""),)).fetchone()
         db.close()
         if u and check_password_hash(u["password"], request.form.get("password","")):
-            session["uid"] = u["id"]
+            session["uid"]  = u["id"]
             session["naam"] = u["naam"] or u["username"]
             session["role"] = u["role"]
             return redirect("/dashboard")
-        err = '<div class="alert al-d">Username ya password galat hai!</div>'
+        err = '<div class="alert al-d">Invalid username or password!</div>'
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>BizHisaab Login</title>{CSS}
+    <title>BizHisaab — Login</title>{CSS}
     <style>body{{display:flex;align-items:center;justify-content:center;background:#0F172A;margin-left:0}}
     .box{{background:#fff;border-radius:14px;padding:36px;width:340px;max-width:95vw}}
     .brand{{text-align:center;font-size:22px;font-weight:800;color:#0F172A;margin-bottom:5px}}
@@ -230,299 +226,362 @@ def login():
     {err}
     <form method="POST" action="/">
     <label class="lbl">Username</label>
-    <input class="inp" name="username" placeholder="username" required autofocus>
+    <input class="inp" name="username" placeholder="Enter username" required autofocus>
     <label class="lbl">Password</label>
-    <input class="inp" type="password" name="password" placeholder="password" required>
-    <button class="lbtn" type="submit">Login Karein</button>
+    <input class="inp" type="password" name="password" placeholder="Enter password" required>
+    <button class="lbtn" type="submit">Login</button>
     </form>
     <div class="hint">Default: admin / admin123</div>
     </div></body></html>"""
 
 @app.route("/logout")
 def logout():
-    session.clear()
-    return redirect("/")
+    session.clear(); return redirect("/")
 
 # ── DASHBOARD ─────────────────────────────────────────────────────────────────
 @app.route("/dashboard")
 @login_req
 def dashboard():
     db = get_db()
-    pu   = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status!='Unpaid (Baqi)'").fetchone()[0]
-    ex   = db.execute("SELECT COALESCE(SUM(rakam),0) FROM akhrajaat").fetchone()[0]
-    co   = db.execute("SELECT COALESCE(SUM(net_rakam),0) FROM courier").fetchone()[0]
-    inv  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM investment").fetchone()[0]
-    ll   = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Liya'").fetchone()[0]
-    lw   = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Wapas'").fetchone()[0]
-    net  = co - pu - ex
-    nc   = "g" if net >= 0 else "r"
-    rpu  = db.execute("SELECT * FROM kharidari ORDER BY created_at DESC LIMIT 5").fetchall()
-    rco  = db.execute("SELECT * FROM courier ORDER BY created_at DESC LIMIT 5").fetchall()
-    rex  = db.execute("SELECT * FROM akhrajaat ORDER BY created_at DESC LIMIT 5").fetchall()
+    pu  = db.execute("SELECT COALESCE(SUM(total_amount),0) FROM purchases WHERE status!='Unpaid'").fetchone()[0]
+    ex  = db.execute("SELECT COALESCE(SUM(amount),0) FROM expenses").fetchone()[0]
+    co  = db.execute("SELECT COALESCE(SUM(net_amount),0) FROM courier").fetchone()[0]
+    inv = db.execute("SELECT COALESCE(SUM(amount),0) FROM investment").fetchone()[0]
+    ll  = db.execute("SELECT COALESCE(SUM(amount),0) FROM loans WHERE type='Loan Taken'").fetchone()[0]
+    lw  = db.execute("SELECT COALESCE(SUM(amount),0) FROM loans WHERE type='Loan Repaid'").fetchone()[0]
+    net = co - pu - ex
+    rpu = db.execute("SELECT * FROM purchases ORDER BY created_at DESC LIMIT 5").fetchall()
+    rco = db.execute("SELECT * FROM courier ORDER BY created_at DESC LIMIT 5").fetchall()
+    rex = db.execute("SELECT * FROM expenses ORDER BY created_at DESC LIMIT 5").fetchall()
     db.close()
 
-    pu_rows = "".join([f"<tr><td>{r['tarikh']}</td><td>{r['vendor']}</td><td>{r['maal']}</td><td>{int(r['qty'])}</td><td>{r['unit']}</td><td class='g'><b>{pk(r['kul_rakam'])}</b></td><td><span class='badge {'bg-g' if 'Paid' in str(r['status']) else 'bg-r' if 'Unpaid' in str(r['status']) else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:14px'>Koi data nahi</td></tr>"
-    co_rows = "".join([f"<tr><td>{r['tarikh']}</td><td><span class='badge bg-b'>{r['courier_naam']}</span></td><td>{r['qism']}</td><td class='g'><b>{pk(r['net_rakam'])}</b></td></tr>" for r in rco]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>Koi data nahi</td></tr>"
-    ex_rows = "".join([f"<tr><td>{r['tarikh']}</td><td><span class='badge bg-w'>{r['head']}</span></td><td>{r['tafseel']}</td><td class='r'><b>{pk(r['rakam'])}</b></td></tr>" for r in rex]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>Koi data nahi</td></tr>"
+    pu_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'])}</td><td>{r['unit']}</td><td class='g'><b>{pk(r['total_amount'])}</b></td><td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    co_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td><td>{r['type']}</td><td class='g'><b>{pk(r['net_amount'])}</b></td></tr>" for r in rco]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    ex_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td><td>{r['description']}</td><td class='r'><b>{pk(r['amount'])}</b></td></tr>" for r in rex]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
-    body = f"""
-    {alerts()}
+    body = f"""{flashes()}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-size:12px;color:#6B7280">Tamam business ka overview</div>
-      <a href="/export/all" class="btn bs" style="font-size:12px">⬇ Poora Data Export (Excel)</a>
+      <div style="font-size:12px;color:#6B7280">Business Overview</div>
+      <a href="/export/all" class="btn bs" style="font-size:12px">⬇ Export All Data</a>
     </div>
     <div class="grid">
-      <div class="met"><div class="ml">Courier Amdani</div><div class="mv g">{pk(co)}</div></div>
-      <div class="met"><div class="ml">Kul Kharidari</div><div class="mv r">{pk(pu)}</div></div>
-      <div class="met"><div class="ml">Kul Akhrajaat</div><div class="mv r">{pk(ex)}</div></div>
-      <div class="met"><div class="ml">Net Faida/Nuksan</div><div class="mv {nc}">{pk(net)}</div></div>
+      <div class="met"><div class="ml">Courier Income (Net)</div><div class="mv g">{pk(co)}</div></div>
+      <div class="met"><div class="ml">Total Purchases</div><div class="mv r">{pk(pu)}</div></div>
+      <div class="met"><div class="ml">Total Expenses</div><div class="mv r">{pk(ex)}</div></div>
+      <div class="met"><div class="ml">Net Profit/Loss</div><div class="mv {'g' if net>=0 else 'r'}">{pk(net)}</div></div>
       <div class="met"><div class="ml">Investment</div><div class="mv b">{pk(inv)}</div></div>
-      <div class="met"><div class="ml">Baqi Loan</div><div class="mv w">{pk(ll-lw)}</div></div>
+      <div class="met"><div class="ml">Outstanding Loan</div><div class="mv w">{pk(ll-lw)}</div></div>
     </div>
     <div class="g2">
-      <div class="card"><div class="ct">Akhri Kharidari</div><div class="tw"><table>
-        <thead><tr><th>Tarikh</th><th>Vendor</th><th>Maal</th><th>Qty</th><th>Unit</th><th>Rakam</th><th>Status</th></tr></thead>
+      <div class="card"><div class="ct">Recent Purchases</div><div class="tw"><table>
+        <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th><th>Amount</th><th>Status</th></tr></thead>
         <tbody>{pu_rows}</tbody></table></div></div>
-      <div class="card"><div class="ct">Akhri Courier</div><div class="tw"><table>
-        <thead><tr><th>Tarikh</th><th>Courier</th><th>Qism</th><th>Net Rakam</th></tr></thead>
+      <div class="card"><div class="ct">Recent Courier Payments</div><div class="tw"><table>
+        <thead><tr><th>Date</th><th>Courier</th><th>Type</th><th>Net Amount</th></tr></thead>
         <tbody>{co_rows}</tbody></table></div></div>
     </div>
-    <div class="card"><div class="ct">Akhri Akhrajaat</div><div class="tw"><table>
-      <thead><tr><th>Tarikh</th><th>Head</th><th>Tafseel</th><th>Rakam</th></tr></thead>
+    <div class="card"><div class="ct">Recent Expenses</div><div class="tw"><table>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
       <tbody>{ex_rows}</tbody></table></div></div>"""
     return layout("Dashboard", "dash", body)
 
-# ── KHARIDARI ─────────────────────────────────────────────────────────────────
-@app.route("/kharidari", methods=["GET","POST"])
+# ── PURCHASES ─────────────────────────────────────────────────────────────────
+@app.route("/purchases", methods=["GET","POST"])
 @login_req
-def kharidari():
+def purchases():
     db = get_db()
     if request.method == "POST":
         f = request.form
-        qty = float(f.get("qty") or 1)
-        dm  = float(f.get("daam") or 0)
-        db.execute("INSERT INTO kharidari (tarikh,vendor,maal,qty,unit,daam,kul_rakam,status,notes,darj_kiya) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (f.get("tarikh") or today(), f.get("vendor",""), f.get("maal",""),
-             qty, f.get("unit","Dozen"), dm, round(qty*dm,2),
-             f.get("status","Paid (Ada)"), f.get("notes",""), session.get("naam","")))
+        qty   = float(f.get("quantity") or 1)
+        total = float(f.get("total_amount") or 0)
+        per_u = round(total / qty, 2) if qty else 0
+        db.execute("""INSERT INTO purchases
+            (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (f.get("date") or today(), f.get("vendor",""), f.get("product",""),
+             qty, f.get("unit","Piece"), total, per_u,
+             f.get("status","Paid"), f.get("notes",""), session.get("naam","")))
         db.commit()
-        session.setdefault('_flashes',[]).append(("success","Kharidari save ho gayi!"))
-        return redirect("/kharidari")
-    rows  = db.execute("SELECT * FROM kharidari ORDER BY created_at DESC").fetchall()
-    total = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari").fetchone()[0]
-    ada   = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status='Paid (Ada)'").fetchone()[0]
-    baqi  = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status='Unpaid (Baqi)'").fetchone()[0]
+        session.setdefault('_flashes',[]).append(("success","Purchase saved successfully!"))
+        return redirect("/purchases")
+
+    rows  = db.execute("SELECT * FROM purchases ORDER BY created_at DESC").fetchall()
+    total = db.execute("SELECT COALESCE(SUM(total_amount),0) FROM purchases").fetchone()[0]
+    paid  = db.execute("SELECT COALESCE(SUM(total_amount),0) FROM purchases WHERE status='Paid'").fetchone()[0]
+    unpaid= db.execute("SELECT COALESCE(SUM(total_amount),0) FROM purchases WHERE status='Unpaid'").fetchone()[0]
     db.close()
 
-    trs = "".join([f"""<tr><td>{r['tarikh']}</td><td>{r['vendor']}</td><td>{r['maal']}</td>
-        <td>{int(r['qty'])}</td><td>{r['unit']}</td><td>{pk(r['daam'])}</td>
-        <td class='g'><b>{pk(r['kul_rakam'])}</b></td>
-        <td><span class='badge {'bg-g' if 'Paid' in str(r['status']) else 'bg-r' if 'Unpaid' in str(r['status']) else 'bg-w'}'>{r['status']}</span></td>
-        <td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td>
-        {'<td><a href="/kharidari/del/'+str(r['id'])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
-        </tr>""" for r in rows]) or f"<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>Koi record nahi</td></tr>"
+    trs = "".join([f"""<tr>
+        <td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td>
+        <td>{int(r['quantity'])}</td><td>{r['unit']}</td>
+        <td class='b'><b>{pk(r['per_unit_price'])}</b></td>
+        <td class='g'><b>{pk(r['total_amount'])}</b></td>
+        <td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td>
+        <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
+        {'<td><a href="/purchases/del/'+str(r['id'])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
+        </tr>""" for r in rows]) or f"<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>No records found</td></tr>"
 
-    body = f"""{alerts()}
-    <div class="card"><div class="ct">Nai Kharidari Darj Karein</div>
-    <form method="POST" action="/kharidari">
+    body = f"""{flashes()}
+    <div class="card"><div class="ct">Add New Purchase</div>
+    <form method="POST" action="/purchases">
     <div class="fgrid">
-      <div class="fg"><label>Vendor ka Naam</label><input name="vendor" placeholder="Vendor naam" required></div>
-      <div class="fg"><label>Maal ka Naam</label><input name="maal" placeholder="Maal naam" required></div>
-      <div class="fg"><label>Quantity</label><input name="qty" type="number" step="0.01" value="1" id="qty" oninput="calc()"></div>
-      <div class="fg"><label>Unit</label><select name="unit"><option>Dozen</option><option>Piece / Adad</option><option>Box</option><option>Kg</option><option>Man</option><option>Other</option></select></div>
-      <div class="fg"><label>Daam per Unit (PKR)</label><input name="daam" type="number" step="0.01" placeholder="0" id="daam" oninput="calc()"></div>
-      <div class="fg"><label>Payment Status</label><select name="status"><option>Paid (Ada)</option><option>Unpaid (Baqi)</option><option>Partial (Adha)</option></select></div>
-      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
+      <div class="fg"><label>Vendor Name</label><input name="vendor" placeholder="Vendor name" required></div>
+      <div class="fg"><label>Product Name</label><input name="product" placeholder="Product name" required></div>
+      <div class="fg"><label>Quantity</label><input name="quantity" type="number" step="0.01" value="1" id="qty" oninput="calc()"></div>
+      <div class="fg"><label>Unit</label>
+        <select name="unit" id="unit" onchange="calc()">
+          <option>Piece</option><option>Dozen</option><option>Box</option>
+          <option>Kg</option><option>Man</option><option>Other</option>
+        </select>
+      </div>
+      <div class="fg"><label>Total Amount Paid (PKR)</label><input name="total_amount" type="number" step="0.01" placeholder="0" id="total" oninput="calc()"></div>
+      <div class="fg"><label>Payment Status</label>
+        <select name="status"><option>Paid</option><option>Unpaid</option><option>Partial</option></select>
+      </div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
       <div class="fg"><label>Notes</label><input name="notes" placeholder="Optional"></div>
     </div>
-    <div class="kul" id="kul">Kul Rakam: Rs 0</div>
-    <button class="btn bp" type="submit">✓ Darj Karein</button>
-    </form></div>
-    <div class="grid" style="margin-bottom:14px">
-      <div class="met"><div class="ml">Kul</div><div class="mv">{pk(total)}</div></div>
-      <div class="met"><div class="ml">Ada</div><div class="mv g">{pk(ada)}</div></div>
-      <div class="met"><div class="ml">Baqi</div><div class="mv r">{pk(baqi)}</div></div>
+    <div class="calc-info" id="calc-info">
+      <span>Per Unit Price: <b id="per-unit">Rs 0</b></span>
+      <span>Total: <b id="total-show">Rs 0</b></span>
+      <span id="unit-show" style="color:#6B7280"></span>
     </div>
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">Tamam Kharidari</div>
-      <a href="/export/kharidari" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
-    </div><div class="tw"><table>
-      <thead><tr><th>Tarikh</th><th>Vendor</th><th>Maal</th><th>Qty</th><th>Unit</th><th>Daam</th><th>Kul Rakam</th><th>Status</th><th>Darj Kiya</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
-      <tbody>{trs}</tbody></table></div></div>
-    <script>document.getElementById('dt').valueAsDate=new Date();
-    function calc(){{var q=parseFloat(document.getElementById('qty').value)||0;var d=parseFloat(document.getElementById('daam').value)||0;document.getElementById('kul').textContent='Kul Rakam: Rs '+Math.round(q*d).toLocaleString();}}</script>"""
-    return layout("Kharidari (Purchases)", "kh", body)
+    <button class="btn bp" type="submit">✓ Save Purchase</button>
+    </form></div>
 
-@app.route("/kharidari/del/<int:i>")
+    <div class="grid" style="margin-bottom:14px">
+      <div class="met"><div class="ml">Total</div><div class="mv">{pk(total)}</div></div>
+      <div class="met"><div class="ml">Paid</div><div class="mv g">{pk(paid)}</div></div>
+      <div class="met"><div class="ml">Unpaid</div><div class="mv r">{pk(unpaid)}</div></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="ct" style="margin:0">All Purchases</div>
+        <a href="/export/purchases" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export Excel</a>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th><th>Per Unit</th><th>Total Amount</th><th>Status</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+        <tbody>{trs}</tbody></table></div></div>
+
+    <script>
+    document.getElementById('dt').valueAsDate = new Date();
+    function calc(){{
+      var q = parseFloat(document.getElementById('qty').value) || 0;
+      var t = parseFloat(document.getElementById('total').value) || 0;
+      var unit = document.getElementById('unit').value;
+      var per = q > 0 ? Math.round(t/q*100)/100 : 0;
+      document.getElementById('per-unit').textContent = 'Rs ' + per.toLocaleString();
+      document.getElementById('total-show').textContent = 'Rs ' + Math.round(t).toLocaleString();
+      document.getElementById('unit-show').textContent = q + ' ' + unit + ' @ Rs ' + per + ' each';
+    }}
+    </script>"""
+    return layout("Purchases", "pur", body)
+
+@app.route("/purchases/del/<int:i>")
 @login_req
 @admin_req
-def del_kh(i):
+def del_purchase(i):
     db = get_db()
-    db.execute("DELETE FROM kharidari WHERE id=?", (i,))
+    db.execute("DELETE FROM purchases WHERE id=?", (i,))
     db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
-    return redirect("/kharidari")
+    session.setdefault('_flashes',[]).append(("info","Record deleted"))
+    return redirect("/purchases")
 
-# ── AKHRAJAAT ──────────────────────────────────────────────────────────────────
-@app.route("/akhrajaat", methods=["GET","POST"])
+# ── EXPENSES ──────────────────────────────────────────────────────────────────
+@app.route("/expenses", methods=["GET","POST"])
 @login_req
-def akhrajaat():
+def expenses():
     db = get_db()
-    hds = [r[0] for r in db.execute("SELECT naam FROM heads ORDER BY naam").fetchall()]
+    cats = [r[0] for r in db.execute("SELECT name FROM exp_categories ORDER BY name").fetchall()]
     if request.method == "POST":
         f = request.form
-        db.execute("INSERT INTO akhrajaat (tarikh,head,tafseel,kise_diya,rakam,tariqa,darj_kiya) VALUES (?,?,?,?,?,?,?)",
-            (f.get("tarikh") or today(), f.get("head",""), f.get("tafseel",""),
-             f.get("kise_diya",""), float(f.get("rakam") or 0),
-             f.get("tariqa","Cash"), session.get("naam","")))
+        db.execute("""INSERT INTO expenses
+            (date,category,description,paid_to,amount,payment_method,added_by)
+            VALUES (?,?,?,?,?,?,?)""",
+            (f.get("date") or today(), f.get("category",""), f.get("description",""),
+             f.get("paid_to",""), float(f.get("amount") or 0),
+             f.get("payment_method","Cash"), session.get("naam","")))
         db.commit()
-        session.setdefault('_flashes',[]).append(("success","Kharcha save ho gaya!"))
-        return redirect("/akhrajaat")
-    rows  = db.execute("SELECT * FROM akhrajaat ORDER BY created_at DESC").fetchall()
-    total = db.execute("SELECT COALESCE(SUM(rakam),0) FROM akhrajaat").fetchone()[0]
-    by_hd = db.execute("SELECT head, SUM(rakam) t FROM akhrajaat GROUP BY head ORDER BY t DESC").fetchall()
+        session.setdefault('_flashes',[]).append(("success","Expense saved successfully!"))
+        return redirect("/expenses")
+
+    rows  = db.execute("SELECT * FROM expenses ORDER BY created_at DESC").fetchall()
+    total = db.execute("SELECT COALESCE(SUM(amount),0) FROM expenses").fetchone()[0]
+    by_cat= db.execute("SELECT category, SUM(amount) t FROM expenses GROUP BY category ORDER BY t DESC").fetchall()
     db.close()
 
-    hd_opts = "".join([f"<option>{h}</option>" for h in hds])
-    trs = "".join([f"""<tr><td>{r['tarikh']}</td><td><span class='badge bg-w'>{r['head']}</span></td>
-        <td>{r['tafseel']}</td><td>{r['kise_diya'] or '—'}</td>
-        <td class='r'><b>{pk(r['rakam'])}</b></td><td>{r['tariqa']}</td>
-        <td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td>
-        {'<td><a href="/akhrajaat/del/'+str(r['id'])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
-        </tr>""" for r in rows]) or "<tr><td colspan='8' style='text-align:center;color:#9CA3AF;padding:14px'>Koi record nahi</td></tr>"
+    cat_opts = "".join([f"<option>{c}</option>" for c in cats])
+    trs = "".join([f"""<tr>
+        <td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td>
+        <td>{r['description']}</td><td>{r['paid_to'] or '—'}</td>
+        <td class='r'><b>{pk(r['amount'])}</b></td><td>{r['payment_method']}</td>
+        <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
+        {'<td><a href="/expenses/del/'+str(r['id'])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
+        </tr>""" for r in rows]) or "<tr><td colspan='8' style='text-align:center;color:#9CA3AF;padding:14px'>No records found</td></tr>"
 
-    hd_summary = "".join([f"<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px'><span>{r['head']}</span><span class='r'><b>{pk(r['t'])}</b></span></div>" for r in by_hd]) or "<div style='color:#9CA3AF;font-size:12px;padding:8px'>Koi data nahi</div>"
+    cat_summary = "".join([f"<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px'><span>{r['category']}</span><span class='r'><b>{pk(r['t'])}</b></span></div>" for r in by_cat]) or "<div style='color:#9CA3AF;font-size:12px;padding:8px'>No data</div>"
 
-    add_head_form = ""
+    add_cat = ""
     if session.get("role") == "admin":
-        add_head_form = f"""<hr style="margin:12px 0;border:none;border-top:1px solid #E2E8F0">
-        <div style="font-size:11px;color:#6B7280;margin-bottom:6px">Naya Head Add Karein:</div>
-        <form method="POST" action="/head/add" style="display:flex;gap:8px">
-        <input name="naam" placeholder="Head naam" style="padding:6px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px;flex:1">
+        add_cat = """<hr style="margin:12px 0;border:none;border-top:1px solid #E2E8F0">
+        <div style="font-size:11px;color:#6B7280;margin-bottom:6px">Add New Category:</div>
+        <form method="POST" action="/expenses/category" style="display:flex;gap:8px">
+        <input name="name" placeholder="Category name" style="padding:6px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px;flex:1">
         <button class="btn bs" type="submit">Add</button></form>"""
 
-    body = f"""{alerts()}
-    <div class="card"><div class="ct">Naya Kharcha Darj Karein</div>
-    <form method="POST" action="/akhrajaat">
+    body = f"""{flashes()}
+    <div class="card"><div class="ct">Add New Expense</div>
+    <form method="POST" action="/expenses">
     <div class="fgrid">
-      <div class="fg"><label>Kharcha Head</label><select name="head">{hd_opts}</select></div>
-      <div class="fg"><label>Tafseel</label><input name="tafseel" placeholder="Tafseel" required></div>
-      <div class="fg"><label>Rakam (PKR)</label><input name="rakam" type="number" step="0.01" placeholder="0" required></div>
-      <div class="fg"><label>Kise Diya</label><input name="kise_diya" placeholder="Optional"></div>
-      <div class="fg"><label>Tariqa</label><select name="tariqa"><option>Cash</option><option>JazzCash</option><option>EasyPaisa</option><option>Bank Transfer</option><option>Cheque</option></select></div>
-      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
+      <div class="fg"><label>Category</label><select name="category">{cat_opts}</select></div>
+      <div class="fg"><label>Description</label><input name="description" placeholder="Expense details" required></div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Paid To</label><input name="paid_to" placeholder="Optional"></div>
+      <div class="fg"><label>Payment Method</label>
+        <select name="payment_method"><option>Cash</option><option>JazzCash</option><option>EasyPaisa</option><option>Bank Transfer</option><option>Cheque</option></select>
+      </div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div>
-    <button class="btn bp" type="submit">✓ Darj Karein</button>
-    </form>{add_head_form}</div>
+    <button class="btn bp" type="submit">✓ Save Expense</button>
+    </form>{add_cat}</div>
     <div class="g2">
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">Tamam Akhrajaat — Kul: <span class="r">{pk(total)}</span></div>
-      <a href="/export/akhrajaat" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
-    </div>
-    <div class="tw"><table>
-      <thead><tr><th>Tarikh</th><th>Head</th><th>Tafseel</th><th>Kise Diya</th><th>Rakam</th><th>Tariqa</th><th>Darj Kiya</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
-      <tbody>{trs}</tbody></table></div></div>
-    <div class="card"><div class="ct">Head Wise Hisaab</div>{hd_summary}</div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="ct" style="margin:0">All Expenses — Total: <span class="r">{pk(total)}</span></div>
+        <a href="/export/expenses" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid To</th><th>Amount</th><th>Method</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+        <tbody>{trs}</tbody></table></div></div>
+    <div class="card"><div class="ct">Category Breakdown</div>{cat_summary}</div>
     </div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
-    return layout("Akhrajaat (Expenses)", "ex", body)
+    return layout("Expenses", "exp", body)
 
-@app.route("/akhrajaat/del/<int:i>")
+@app.route("/expenses/del/<int:i>")
 @login_req
 @admin_req
-def del_ex(i):
+def del_expense(i):
     db = get_db()
-    db.execute("DELETE FROM akhrajaat WHERE id=?", (i,))
+    db.execute("DELETE FROM expenses WHERE id=?", (i,))
     db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
-    return redirect("/akhrajaat")
+    session.setdefault('_flashes',[]).append(("info","Record deleted"))
+    return redirect("/expenses")
 
-@app.route("/head/add", methods=["POST"])
+@app.route("/expenses/category", methods=["POST"])
 @login_req
 @admin_req
-def add_head():
-    naam = request.form.get("naam","").strip()
-    if naam:
+def add_category():
+    name = request.form.get("name","").strip()
+    if name:
         db = get_db()
         try:
-            db.execute("INSERT INTO heads (naam) VALUES (?)", (naam,))
+            db.execute("INSERT INTO exp_categories (name) VALUES (?)", (name,))
             db.commit()
-            session.setdefault('_flashes',[]).append(("success",f"{naam} add ho gaya!"))
+            session.setdefault('_flashes',[]).append(("success",f"Category '{name}' added!"))
         except:
-            session.setdefault('_flashes',[]).append(("danger","Head already exists"))
+            session.setdefault('_flashes',[]).append(("danger","Category already exists"))
         db.close()
-    return redirect("/akhrajaat")
+    return redirect("/expenses")
 
-# ── COURIER ────────────────────────────────────────────────────────────────────
+# ── COURIER ───────────────────────────────────────────────────────────────────
 @app.route("/courier", methods=["GET","POST"])
 @login_req
 def courier():
     db = get_db()
     if request.method == "POST":
-        f = request.form
-        mila = float(f.get("mila") or 0)
+        f    = request.form
+        cod  = float(f.get("total_cod") or 0)
         chg  = float(f.get("charges") or 0)
-        db.execute("INSERT INTO courier (tarikh,courier_naam,qism,parcel_tadaad,mila,charges,net_rakam,reference,darj_kiya) VALUES (?,?,?,?,?,?,?,?,?)",
-            (f.get("tarikh") or today(), f.get("courier_naam","TCS"), f.get("qism","COD"),
-             float(f.get("parcel_tadaad") or 0), mila, chg, round(mila-chg,2),
+        db.execute("""INSERT INTO courier
+            (date,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (f.get("date") or today(), f.get("courier_name","TCS"), f.get("type","COD"),
+             float(f.get("parcels") or 0), cod, chg, round(cod-chg,2),
              f.get("reference",""), session.get("naam","")))
         db.commit()
-        session.setdefault('_flashes',[]).append(("success","Courier payment save ho gayi!"))
+        session.setdefault('_flashes',[]).append(("success","Courier payment saved!"))
         return redirect("/courier")
+
     rows = db.execute("SELECT * FROM courier ORDER BY created_at DESC").fetchall()
-    tm   = db.execute("SELECT COALESCE(SUM(mila),0) FROM courier").fetchone()[0]
-    tc   = db.execute("SELECT COALESCE(SUM(charges),0) FROM courier").fetchone()[0]
+    t_cod= db.execute("SELECT COALESCE(SUM(total_cod),0) FROM courier").fetchone()[0]
+    t_chg= db.execute("SELECT COALESCE(SUM(charges),0) FROM courier").fetchone()[0]
     db.close()
 
-    trs = "".join([f"""<tr><td>{r['tarikh']}</td><td><span class='badge bg-b'>{r['courier_naam']}</span></td>
-        <td>{r['qism']}</td><td>{int(r['parcel_tadaad'])}</td>
-        <td class='g'><b>{pk(r['mila'])}</b></td><td class='r'>{pk(r['charges'])}</td>
-        <td><b>{pk(r['net_rakam'])}</b></td><td>{r['reference'] or '—'}</td>
-        <td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td>
+    trs = "".join([f"""<tr>
+        <td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td>
+        <td>{r['type']}</td><td>{int(r['parcels'])}</td>
+        <td class='g'><b>{pk(r['total_cod'])}</b></td>
+        <td class='r'>{pk(r['charges'])}</td>
+        <td><b>{pk(r['net_amount'])}</b></td>
+        <td>{r['reference'] or '—'}</td>
+        <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
         {'<td><a href="/courier/del/'+str(r['id'])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
-        </tr>""" for r in rows]) or "<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>Koi record nahi</td></tr>"
+        </tr>""" for r in rows]) or "<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>No records found</td></tr>"
 
-    body = f"""{alerts()}
-    <div class="card"><div class="ct">Courier Payment Darj Karein</div>
+    body = f"""{flashes()}
+    <div class="card"><div class="ct">Add Courier Payment</div>
     <form method="POST" action="/courier">
     <div class="fgrid">
-      <div class="fg"><label>Courier</label><select name="courier_naam"><option>TCS</option><option>Leopards</option><option>M&P</option><option>BlueEx</option><option>Postex</option><option>Other</option></select></div>
-      <div class="fg"><label>Qism</label><select name="qism"><option>COD</option><option>Online/Prepaid</option><option>Settlement</option></select></div>
-      <div class="fg"><label>Mila (PKR)</label><input name="mila" type="number" step="0.01" placeholder="0" id="mila" oninput="calc()"></div>
-      <div class="fg"><label>Charges (PKR)</label><input name="charges" type="number" step="0.01" placeholder="0" id="chg" oninput="calc()"></div>
-      <div class="fg"><label>Parcel Tadaad</label><input name="parcel_tadaad" type="number" placeholder="0"></div>
-      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
-      <div class="fg"><label>Reference No.</label><input name="reference" placeholder="Sheet no."></div>
+      <div class="fg"><label>Courier Company</label>
+        <select name="courier_name"><option>TCS</option><option>Leopards</option><option>M&P</option><option>BlueEx</option><option>Postex</option><option>Daewoo</option><option>DigiDokaan</option><option>Other</option></select>
+      </div>
+      <div class="fg"><label>Payment Type</label>
+        <select name="type"><option>COD</option><option>Online/Prepaid</option><option>Settlement</option></select>
+      </div>
+      <div class="fg"><label>Total COD Amount (PKR)</label><input name="total_cod" type="number" step="0.01" placeholder="0" id="cod" oninput="calc()"></div>
+      <div class="fg"><label>Courier Charges (PKR)</label><input name="charges" type="number" step="0.01" placeholder="0" id="chg" oninput="calc()"></div>
+      <div class="fg"><label>No. of Parcels</label><input name="parcels" type="number" placeholder="0"></div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
+      <div class="fg"><label>Reference / Sheet No.</label><input name="reference" placeholder="Settlement sheet no."></div>
     </div>
-    <div class="kul" id="net">Net Rakam: Rs 0</div>
-    <button class="btn bp" type="submit">✓ Darj Karein</button>
+    <div class="calc-info" id="calc-info">
+      <span>Total COD: <b id="cod-show">Rs 0</b></span>
+      <span>Charges: <b id="chg-show" style="color:#DC2626">Rs 0</b></span>
+      <span>Net Amount: <b id="net-show" style="color:#16A34A">Rs 0</b></span>
+    </div>
+    <button class="btn bp" type="submit">✓ Save Payment</button>
     </form></div>
+
     <div class="grid" style="margin-bottom:14px">
-      <div class="met"><div class="ml">Kul Mila</div><div class="mv g">{pk(tm)}</div></div>
-      <div class="met"><div class="ml">Kul Charges</div><div class="mv r">{pk(tc)}</div></div>
-      <div class="met"><div class="ml">Net Rakam</div><div class="mv b">{pk(tm-tc)}</div></div>
+      <div class="met"><div class="ml">Total COD</div><div class="mv g">{pk(t_cod)}</div></div>
+      <div class="met"><div class="ml">Total Charges</div><div class="mv r">{pk(t_chg)}</div></div>
+      <div class="met"><div class="ml">Net Amount</div><div class="mv b">{pk(t_cod-t_chg)}</div></div>
     </div>
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">Tamam Courier Records</div>
-      <a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
-    </div><div class="tw"><table>
-      <thead><tr><th>Tarikh</th><th>Courier</th><th>Qism</th><th>Parcels</th><th>Mila</th><th>Charges</th><th>Net</th><th>Reference</th><th>Darj Kiya</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
-      <tbody>{trs}</tbody></table></div></div>
-    <script>document.getElementById('dt').valueAsDate=new Date();
-    function calc(){{var m=parseFloat(document.getElementById('mila').value)||0;var c=parseFloat(document.getElementById('chg').value)||0;document.getElementById('net').textContent='Net Rakam: Rs '+Math.round(m-c).toLocaleString();}}</script>"""
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="ct" style="margin:0">All Courier Records</div>
+        <a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Courier</th><th>Type</th><th>Parcels</th><th>Total COD</th><th>Charges</th><th>Net Amount</th><th>Reference</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+        <tbody>{trs}</tbody></table></div></div>
+
+    <script>
+    document.getElementById('dt').valueAsDate=new Date();
+    function calc(){{
+      var c=parseFloat(document.getElementById('cod').value)||0;
+      var x=parseFloat(document.getElementById('chg').value)||0;
+      document.getElementById('cod-show').textContent='Rs '+Math.round(c).toLocaleString();
+      document.getElementById('chg-show').textContent='Rs '+Math.round(x).toLocaleString();
+      document.getElementById('net-show').textContent='Rs '+Math.round(c-x).toLocaleString();
+    }}
+    </script>"""
     return layout("Courier Payments", "co", body)
 
 @app.route("/courier/del/<int:i>")
 @login_req
 @admin_req
-def del_co(i):
+def del_courier(i):
     db = get_db()
     db.execute("DELETE FROM courier WHERE id=?", (i,))
     db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
+    session.setdefault('_flashes',[]).append(("info","Record deleted"))
     return redirect("/courier")
 
-# ── INVESTMENT ─────────────────────────────────────────────────────────────────
+# ── INVESTMENT ────────────────────────────────────────────────────────────────
 @app.route("/investment", methods=["GET","POST"])
 @login_req
 @admin_req
@@ -530,47 +589,48 @@ def investment():
     db = get_db()
     if request.method == "POST":
         f = request.form
-        db.execute("INSERT INTO investment (tarikh,tafseel,rakam,darj_kiya) VALUES (?,?,?,?)",
-            (f.get("tarikh") or today(), f.get("tafseel",""), float(f.get("rakam") or 0), session.get("naam","")))
+        db.execute("INSERT INTO investment (date,description,amount,added_by) VALUES (?,?,?,?)",
+            (f.get("date") or today(), f.get("description",""), float(f.get("amount") or 0), session.get("naam","")))
         db.commit()
-        session.setdefault('_flashes',[]).append(("success","Investment save ho gayi!"))
+        session.setdefault('_flashes',[]).append(("success","Investment saved!"))
         return redirect("/investment")
     rows  = db.execute("SELECT * FROM investment ORDER BY created_at DESC").fetchall()
-    total = db.execute("SELECT COALESCE(SUM(rakam),0) FROM investment").fetchone()[0]
+    total = db.execute("SELECT COALESCE(SUM(amount),0) FROM investment").fetchone()[0]
     db.close()
 
-    trs = "".join([f"<tr><td>{r['tarikh']}</td><td>{r['tafseel']}</td><td class='g'><b>{pk(r['rakam'])}</b></td><td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td><td><a href='/investment/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a></td></tr>" for r in rows]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>Koi record nahi</td></tr>"
+    trs = "".join([f"<tr><td>{r['date']}</td><td>{r['description']}</td><td class='g'><b>{pk(r['amount'])}</b></td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td><td><a href='/investment/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a></td></tr>" for r in rows]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
-    body = f"""{alerts()}
-    <div class="card"><div class="ct">Nai Investment Darj Karein</div>
+    body = f"""{flashes()}
+    <div class="card"><div class="ct">Add Investment</div>
     <form method="POST" action="/investment">
     <div class="fgrid">
-      <div class="fg"><label>Rakam (PKR)</label><input name="rakam" type="number" step="0.01" placeholder="0" required></div>
-      <div class="fg"><label>Tafseel / Source</label><input name="tafseel" placeholder="e.g. Apni savings" required></div>
-      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Description / Source</label><input name="description" placeholder="e.g. Personal savings" required></div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div>
-    <button class="btn bs" type="submit">✓ Darj Karein</button>
+    <button class="btn bs" type="submit">✓ Save Investment</button>
     </form></div>
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">Tamam Investment — Kul: <span class="g">{pk(total)}</span></div>
-      <a href="/export/investment" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
-    </div>
-    <div class="tw"><table><thead><tr><th>Tarikh</th><th>Tafseel</th><th>Rakam</th><th>Darj Kiya</th><th></th></tr></thead>
-    <tbody>{trs}</tbody></table></div></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="ct" style="margin:0">All Investments — Total: <span class="g">{pk(total)}</span></div>
+        <a href="/export/investment" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div class="tw"><table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Added By</th><th></th></tr></thead>
+      <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
     return layout("Investment", "inv", body)
 
 @app.route("/investment/del/<int:i>")
 @login_req
 @admin_req
-def del_inv(i):
+def del_investment(i):
     db = get_db()
     db.execute("DELETE FROM investment WHERE id=?", (i,))
     db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
+    session.setdefault('_flashes',[]).append(("info","Record deleted"))
     return redirect("/investment")
 
-# ── LOAN ───────────────────────────────────────────────────────────────────────
+# ── LOANS ─────────────────────────────────────────────────────────────────────
 @app.route("/loan", methods=["GET","POST"])
 @login_req
 @admin_req
@@ -578,100 +638,213 @@ def loan():
     db = get_db()
     if request.method == "POST":
         f = request.form
-        db.execute("INSERT INTO loan (tarikh,shakhs,qism,rakam,darj_kiya) VALUES (?,?,?,?,?)",
-            (f.get("tarikh") or today(), f.get("shakhs",""), f.get("qism","Loan Liya"), float(f.get("rakam") or 0), session.get("naam","")))
+        db.execute("INSERT INTO loans (date,person,type,amount,added_by) VALUES (?,?,?,?,?)",
+            (f.get("date") or today(), f.get("person",""), f.get("type","Loan Taken"),
+             float(f.get("amount") or 0), session.get("naam","")))
         db.commit()
-        session.setdefault('_flashes',[]).append(("success","Loan save ho gaya!"))
+        session.setdefault('_flashes',[]).append(("success","Loan record saved!"))
         return redirect("/loan")
-    rows  = db.execute("SELECT * FROM loan ORDER BY created_at DESC").fetchall()
-    liya  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Liya'").fetchone()[0]
-    wapas = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Wapas'").fetchone()[0]
+    rows  = db.execute("SELECT * FROM loans ORDER BY created_at DESC").fetchall()
+    taken = db.execute("SELECT COALESCE(SUM(amount),0) FROM loans WHERE type='Loan Taken'").fetchone()[0]
+    repaid= db.execute("SELECT COALESCE(SUM(amount),0) FROM loans WHERE type='Loan Repaid'").fetchone()[0]
     db.close()
 
-    trs = "".join([f"<tr><td>{r['tarikh']}</td><td>{r['shakhs']}</td><td><span class='badge {'bg-r' if r['qism']=='Loan Liya' else 'bg-g'}'>{r['qism']}</span></td><td style='font-weight:600;color:{'#DC2626' if r['qism']=='Loan Liya' else '#16A34A'}'>{pk(r['rakam'])}</td><td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td><td><a href='/loan/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a></td></tr>" for r in rows]) or "<tr><td colspan='6' style='text-align:center;color:#9CA3AF;padding:14px'>Koi record nahi</td></tr>"
+    trs = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td><span class='badge {'bg-r' if r['type']=='Loan Taken' else 'bg-g'}'>{r['type']}</span></td><td style='font-weight:600;color:{'#DC2626' if r['type']=='Loan Taken' else '#16A34A'}'>{pk(r['amount'])}</td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td><td><a href='/loan/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a></td></tr>" for r in rows]) or "<tr><td colspan='6' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
-    body = f"""{alerts()}
-    <div class="card"><div class="ct">Loan Darj Karein</div>
+    body = f"""{flashes()}
+    <div class="card"><div class="ct">Add Loan Record</div>
     <form method="POST" action="/loan">
     <div class="fgrid">
-      <div class="fg"><label>Shakhs ka Naam</label><input name="shakhs" placeholder="e.g. Bhai, Hamza" required></div>
-      <div class="fg"><label>Qism</label><select name="qism"><option>Loan Liya</option><option>Loan Wapas</option></select></div>
-      <div class="fg"><label>Rakam (PKR)</label><input name="rakam" type="number" step="0.01" placeholder="0" required></div>
-      <div class="fg"><label>Tarikh</label><input name="tarikh" type="date" id="dt"></div>
+      <div class="fg"><label>Person Name</label><input name="person" placeholder="e.g. Brother, Hamza" required></div>
+      <div class="fg"><label>Type</label><select name="type"><option>Loan Taken</option><option>Loan Repaid</option></select></div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div>
-    <button class="btn bp" type="submit">✓ Darj Karein</button>
+    <button class="btn bp" type="submit">✓ Save Record</button>
     </form></div>
     <div class="grid" style="margin-bottom:14px">
-      <div class="met"><div class="ml">Loan Liya</div><div class="mv r">{pk(liya)}</div></div>
-      <div class="met"><div class="ml">Loan Wapas</div><div class="mv g">{pk(wapas)}</div></div>
-      <div class="met"><div class="ml">Baqi</div><div class="mv w">{pk(liya-wapas)}</div></div>
+      <div class="met"><div class="ml">Loan Taken</div><div class="mv r">{pk(taken)}</div></div>
+      <div class="met"><div class="ml">Loan Repaid</div><div class="mv g">{pk(repaid)}</div></div>
+      <div class="met"><div class="ml">Outstanding</div><div class="mv w">{pk(taken-repaid)}</div></div>
     </div>
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">Tamam Loan Records</div>
-      <a href="/export/loan" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
-    </div>
-    <div class="tw"><table><thead><tr><th>Tarikh</th><th>Shakhs</th><th>Qism</th><th>Rakam</th><th>Darj Kiya</th><th></th></tr></thead>
-    <tbody>{trs}</tbody></table></div></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="ct" style="margin:0">All Loan Records</div>
+        <a href="/export/loans" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div class="tw"><table><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Amount</th><th>Added By</th><th></th></tr></thead>
+      <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
-    return layout("Loan Records", "ln", body)
+    return layout("Loans", "ln", body)
 
 @app.route("/loan/del/<int:i>")
 @login_req
 @admin_req
 def del_loan(i):
     db = get_db()
-    db.execute("DELETE FROM loan WHERE id=?", (i,))
+    db.execute("DELETE FROM loans WHERE id=?", (i,))
     db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
+    session.setdefault('_flashes',[]).append(("info","Record deleted"))
     return redirect("/loan")
 
-# ── P&L ────────────────────────────────────────────────────────────────────────
+# ── CASH & BANK ───────────────────────────────────────────────────────────────
+ACCOUNTS = ["Cash in Hand","Bank (HBL/MCB)","JazzCash","EasyPaisa"]
+
+@app.route("/cashbank", methods=["GET","POST"])
+@login_req
+def cashbank():
+    db = get_db()
+    if request.method == "POST":
+        f = request.form
+        amount = float(f.get("amount") or 0)
+        if not amount:
+            session.setdefault('_flashes',[]).append(("danger","Amount is required"))
+            return redirect("/cashbank")
+        db.execute("INSERT INTO cashbank (date,account,type,description,amount,added_by) VALUES (?,?,?,?,?,?)",
+            (f.get("date") or today(), f.get("account","Cash in Hand"),
+             f.get("type","Money In"), f.get("description",""),
+             amount, session.get("naam","")))
+        db.commit()
+        session.setdefault('_flashes',[]).append(("success","Entry saved!"))
+        return redirect("/cashbank")
+
+    acc_filter = request.args.get("acc","")
+    if acc_filter:
+        rows = db.execute("SELECT * FROM cashbank WHERE account=? ORDER BY date ASC, created_at ASC", (acc_filter,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM cashbank ORDER BY date ASC, created_at ASC").fetchall()
+
+    balances = {}
+    for acc in ACCOUNTS:
+        in_  = db.execute("SELECT COALESCE(SUM(amount),0) FROM cashbank WHERE account=? AND type IN ('Money In','Opening Balance')",(acc,)).fetchone()[0]
+        out_ = db.execute("SELECT COALESCE(SUM(amount),0) FROM cashbank WHERE account=? AND type='Money Out'",(acc,)).fetchone()[0]
+        balances[acc] = in_ - out_
+    total_bal = sum(balances.values())
+    db.close()
+
+    acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
+    for acc in ACCOUNTS:
+        bal = balances[acc]
+        col = "#16A34A" if bal >= 0 else "#DC2626"
+        acc_btns += f"<a href='/cashbank?acc={acc}' class='btn {'bp' if acc_filter==acc else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px;border:1px solid #E2E8F0'>{acc}<br><small style='color:{col}'>{pk(bal)}</small></a>"
+
+    running = {}
+    trs = ""
+    if not rows:
+        trs = "<tr><td colspan='8' style='text-align:center;color:#9CA3AF;padding:16px'>No entries — add Opening Balance first</td></tr>"
+    else:
+        for r in rows:
+            acc = r['account']
+            if acc not in running: running[acc] = 0
+            if r['type'] in ('Money In','Opening Balance'):
+                running[acc] += r['amount']
+                sign, col = "+", "g"
+            else:
+                running[acc] -= r['amount']
+                sign, col = "-", "r"
+            bal = running[acc]
+            bal_col = "#16A34A" if bal >= 0 else "#DC2626"
+            badge = "bg-g" if r['type'] in ('Money In','Opening Balance') else "bg-r"
+            del_btn = f"<a href='/cashbank/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a>" if session.get('role')=='admin' else ""
+            trs += f"""<tr>
+                <td>{r['date']}</td>
+                <td><span class='badge bg-b'>{r['account']}</span></td>
+                <td><span class='badge {badge}'>{r['type']}</span></td>
+                <td>{r['description'] or '—'}</td>
+                <td class='{col}'><b>{sign} {pk(r['amount'])}</b></td>
+                <td style='font-weight:700;color:{bal_col}'>{pk(bal)}</td>
+                <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
+                <td>{del_btn}</td>
+            </tr>"""
+
+    acc_opts = "".join([f"<option>{a}</option>" for a in ACCOUNTS])
+    body = f"""{flashes()}
+    <div class="grid">
+      <div class="met"><div class="ml">Total Balance (All)</div><div class="mv {'g' if total_bal>=0 else 'r'}">{pk(total_bal)}</div></div>
+      {"".join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {"g" if balances[acc]>=0 else "r"}">{pk(balances[acc])}</div></div>' for acc in ACCOUNTS])}
+    </div>
+    <div class="card"><div class="ct">Add Entry</div>
+    <form method="POST" action="/cashbank">
+    <div class="fgrid">
+      <div class="fg"><label>Account</label><select name="account">{acc_opts}</select></div>
+      <div class="fg"><label>Type</label>
+        <select name="type"><option>Opening Balance</option><option>Money In</option><option>Money Out</option></select>
+      </div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Description</label><input name="description" placeholder="e.g. Received from courier, Paid to vendor"></div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
+    </div>
+    <button class="btn bp" type="submit">✓ Save Entry</button>
+    </form></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div class="ct" style="margin:0">Cash & Bank Ledger</div>
+        <a href="/export/cashbank" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div style="margin-bottom:10px;display:flex;flex-wrap:wrap">{acc_btns}</div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Description</th><th>Amount</th><th>Balance</th><th>Added By</th><th></th></tr></thead>
+        <tbody>{trs}</tbody></table></div></div>
+    <div style="background:#EFF6FF;border-radius:8px;padding:10px;font-size:11px;color:#1E40AF;margin-top:8px">
+      <b>Guide:</b> Opening Balance = starting balance | Money In = received | Money Out = paid
+    </div>
+    <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
+    return layout("Cash & Bank", "cb", body)
+
+@app.route("/cashbank/del/<int:i>")
+@login_req
+@admin_req
+def del_cashbank(i):
+    db = get_db()
+    db.execute("DELETE FROM cashbank WHERE id=?", (i,))
+    db.commit(); db.close()
+    session.setdefault('_flashes',[]).append(("info","Record deleted"))
+    return redirect("/cashbank")
+
+# ── P&L ───────────────────────────────────────────────────────────────────────
 @app.route("/pnl")
 @login_req
 @admin_req
 def pnl():
     db = get_db()
-    tr  = db.execute("SELECT COALESCE(SUM(mila),0) FROM courier").fetchone()[0]
+    tr  = db.execute("SELECT COALESCE(SUM(total_cod),0) FROM courier").fetchone()[0]
     tc  = db.execute("SELECT COALESCE(SUM(charges),0) FROM courier").fetchone()[0]
     nc  = tr - tc
-    tp  = db.execute("SELECT COALESCE(SUM(kul_rakam),0) FROM kharidari WHERE status!='Unpaid (Baqi)'").fetchone()[0]
-    te  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM akhrajaat").fetchone()[0]
+    tp  = db.execute("SELECT COALESCE(SUM(total_amount),0) FROM purchases WHERE status!='Unpaid'").fetchone()[0]
+    te  = db.execute("SELECT COALESCE(SUM(amount),0) FROM expenses").fetchone()[0]
     gp  = tr - tp
     np  = gp - tc - te
-    ti  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM investment").fetchone()[0]
-    ll  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Liya'").fetchone()[0]
-    lw  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM loan WHERE qism='Loan Wapas'").fetchone()[0]
-    hds = db.execute("SELECT head, SUM(rakam) t FROM akhrajaat GROUP BY head ORDER BY t DESC").fetchall()
+    ti  = db.execute("SELECT COALESCE(SUM(amount),0) FROM investment").fetchone()[0]
+    ll  = db.execute("SELECT COALESCE(SUM(amount),0) FROM loans WHERE type='Loan Taken'").fetchone()[0]
+    lw  = db.execute("SELECT COALESCE(SUM(amount),0) FROM loans WHERE type='Loan Repaid'").fetchone()[0]
+    cats= db.execute("SELECT category, SUM(amount) t FROM expenses GROUP BY category ORDER BY t DESC").fetchall()
     db.close()
 
-    hd_rows = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['head']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in hds])
-    nc_color = "g" if nc >= 0 else "r"
-    gp_color = "g" if gp >= 0 else "r"
-    np_color = "g" if np >= 0 else "r"
+    cat_rows = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['category']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in cats])
 
-    body = f"""{alerts()}
-    <div class="card" style="max-width:600px">
-      <div class="ct" style="font-size:14px">Munafa / Nuksan — P&L Report</div>
-      <div class="pnl-s">AMDANI — Courier se Mila</div>
-      <div class="pnl-r"><span>Courier se Mila (Total)</span><span class="{nc_color}"><b>{pk(tr)}</b></span></div>
-      <div class="pnl-r"><span style="padding-left:12px;color:#6B7280">Courier Charges Kate</span><span class="r">({pk(tc)})</span></div>
-      <div class="pnl-r pnl-t"><span>Net Amdani</span><span class="{nc_color}">{pk(nc)}</span></div>
-      <div class="pnl-s">KHARIDARI (Lagat)</div>
-      <div class="pnl-r"><span>Vendor se Kharidari (Ada)</span><span class="r">({pk(tp)})</span></div>
-      <div class="pnl-r pnl-t"><span>Gross Munafa</span><span class="{gp_color}">{pk(gp)}</span></div>
-      <div class="pnl-s">AKHRAJAAT — Head Wise</div>
-      {hd_rows}
-      <div class="pnl-r pnl-t"><span>Kul Akhrajaat</span><span class="r">({pk(te)})</span></div>
-      <div class="pnl-grand"><span>NET MUNAFA / NUKSAN</span><span class="{np_color}" style="font-size:16px">{pk(np)}</span></div>
-      <div class="pnl-s">CAPITAL & LOAN</div>
-      <div class="pnl-r"><span>Apni Investment</span><span class="b">{pk(ti)}</span></div>
-      <div class="pnl-r"><span>Loan Liya</span><span class="r">{pk(ll)}</span></div>
-      <div class="pnl-r"><span>Loan Wapas Kiya</span><span class="g">{pk(lw)}</span></div>
-      <div class="pnl-r pnl-t"><span>Baqi Loan</span><span class="w">{pk(ll-lw)}</span></div>
+    body = f"""{flashes()}
+    <div class="card" style="max-width:620px">
+      <div class="ct" style="font-size:14px">Profit & Loss Statement — All Time</div>
+      <div class="pnl-s">INCOME — Courier Payments</div>
+      <div class="pnl-r"><span>Total COD Received</span><span class="g"><b>{pk(tr)}</b></span></div>
+      <div class="pnl-r"><span style="padding-left:12px;color:#6B7280">Courier Charges Deducted</span><span class="r">({pk(tc)})</span></div>
+      <div class="pnl-r pnl-t"><span>Net Income</span><span class="{'g' if nc>=0 else 'r'}">{pk(nc)}</span></div>
+      <div class="pnl-s">COST OF GOODS (Purchases)</div>
+      <div class="pnl-r"><span>Total Purchases (Paid)</span><span class="r">({pk(tp)})</span></div>
+      <div class="pnl-r pnl-t"><span>Gross Profit</span><span class="{'g' if gp>=0 else 'r'}">{pk(gp)}</span></div>
+      <div class="pnl-s">OPERATING EXPENSES — By Category</div>
+      {cat_rows}
+      <div class="pnl-r pnl-t"><span>Total Expenses</span><span class="r">({pk(te)})</span></div>
+      <div class="pnl-grand"><span>NET PROFIT / LOSS</span><span class="{'g' if np>=0 else 'r'}" style="font-size:16px">{pk(np)}</span></div>
+      <div class="pnl-s">CAPITAL & LIABILITIES</div>
+      <div class="pnl-r"><span>Total Investment</span><span class="b">{pk(ti)}</span></div>
+      <div class="pnl-r"><span>Loans Taken</span><span class="r">{pk(ll)}</span></div>
+      <div class="pnl-r"><span>Loans Repaid</span><span class="g">{pk(lw)}</span></div>
+      <div class="pnl-r pnl-t"><span>Outstanding Loan</span><span class="w">{pk(ll-lw)}</span></div>
     </div>"""
     return layout("P&L Report", "pnl", body)
 
-# ── USERS ──────────────────────────────────────────────────────────────────────
+# ── USERS ─────────────────────────────────────────────────────────────────────
 @app.route("/users", methods=["GET","POST"])
 @login_req
 @admin_req
@@ -684,32 +857,34 @@ def users():
                 (f.get("username",""), generate_password_hash(f.get("password","")),
                  f.get("role","employee"), f.get("naam","")))
             db.commit()
-            session.setdefault('_flashes',[]).append(("success",f"{f.get('username')} add ho gaya!"))
+            session.setdefault('_flashes',[]).append(("success",f"User '{f.get('username')}' added!"))
         except:
             session.setdefault('_flashes',[]).append(("danger","Username already exists!"))
         return redirect("/users")
     rows = db.execute("SELECT id,username,naam,role FROM users ORDER BY id").fetchall()
     db.close()
 
-    trs = "".join([f"<tr><td>{r['id']}</td><td>{r['naam'] or '—'}</td><td>{r['username']}</td><td><span class='badge {'bg-b' if r['role']=='admin' else 'bg-g'}'>{r['role']}</span></td><td>{'<a href=\"/users/del/'+str(r['id'])+'\" class=\"btn bd\" onclick=\"return confirm(\'Delete?\')\" >Del</a>' if r['id'] != session.get('uid') else '<span style=\"font-size:10px;color:#9CA3AF\">Aap</span>'}</td></tr>" for r in rows])
+    trs = "".join([f"<tr><td>{r['id']}</td><td>{r['naam'] or '—'}</td><td>{r['username']}</td><td><span class='badge {'bg-b' if r['role']=='admin' else 'bg-g'}'>{r['role']}</span></td><td>{'<a href=\"/users/del/'+str(r['id'])+'\" class=\"btn bd\" onclick=\"return confirm(\'Delete?\')\" >Del</a>' if r['id'] != session.get('uid') else '<span style=\"font-size:10px;color:#9CA3AF\">You</span>'}</td></tr>" for r in rows])
 
-    body = f"""{alerts()}
-    <div class="card"><div class="ct">Naya User Add Karein</div>
+    body = f"""{flashes()}
+    <div class="card"><div class="ct">Add New User</div>
     <form method="POST" action="/users">
     <div class="fgrid">
-      <div class="fg"><label>Naam</label><input name="naam" placeholder="Employee naam" required></div>
+      <div class="fg"><label>Full Name</label><input name="naam" placeholder="Employee name" required></div>
       <div class="fg"><label>Username</label><input name="username" placeholder="login username" required></div>
       <div class="fg"><label>Password</label><input name="password" type="password" placeholder="password" required></div>
-      <div class="fg"><label>Role</label><select name="role"><option value="employee">Employee (limited)</option><option value="admin">Admin (full access)</option></select></div>
+      <div class="fg"><label>Role</label>
+        <select name="role"><option value="employee">Employee (limited)</option><option value="admin">Admin (full access)</option></select>
+      </div>
     </div>
-    <button class="btn bp" type="submit">✓ Add Karein</button>
+    <button class="btn bp" type="submit">✓ Add User</button>
     </form>
     <div style="margin-top:10px;padding:10px;background:#FEF3C7;border-radius:7px;font-size:11px;color:#92400E">
-      <b>Employee:</b> Kharidari, Akhrajaat, Courier add/dekh sakta hai.<br>
-      <b>Admin:</b> Sab kuch — Delete, Investment, Loan, P&L, Users.
+      <b>Employee:</b> Can view/add Purchases, Expenses, Courier. Cannot delete or access Investment/Loans.<br>
+      <b>Admin:</b> Full access — delete, investment, loans, P&L, users management.
     </div></div>
-    <div class="card"><div class="ct">Tamam Users</div>
-    <div class="tw"><table><thead><tr><th>ID</th><th>Naam</th><th>Username</th><th>Role</th><th></th></tr></thead>
+    <div class="card"><div class="ct">All Users</div>
+    <div class="tw"><table><thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Role</th><th></th></tr></thead>
     <tbody>{trs}</tbody></table></div></div>"""
     return layout("Users", "usr", body)
 
@@ -718,229 +893,69 @@ def users():
 @admin_req
 def del_user(i):
     if i == session.get("uid"):
-        session.setdefault('_flashes',[]).append(("danger","Aap khud ko delete nahi kar sakte"))
+        session.setdefault('_flashes',[]).append(("danger","You cannot delete yourself"))
         return redirect("/users")
     db = get_db()
     db.execute("DELETE FROM users WHERE id=?", (i,))
     db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","User delete ho gaya"))
+    session.setdefault('_flashes',[]).append(("info","User deleted"))
     return redirect("/users")
 
-# ── CASH & BANK LEDGER ────────────────────────────────────────────────────────
-ACCOUNTS = ["Cash in Hand", "Bank (HBL/MCB)", "JazzCash", "EasyPaisa"]
-
-@app.route("/ledger", methods=["GET","POST"])
-@login_req
-def ledger():
-    db = get_db()
-    if request.method == "POST":
-        f = request.form
-        rakam = float(f.get("rakam") or 0)
-        if not rakam:
-            session.setdefault('_flashes',[]).append(("danger","Rakam zaroori hai"))
-            return redirect("/ledger")
-        db.execute("INSERT INTO ledger (tarikh,account,qism,tafseel,rakam,darj_kiya) VALUES (?,?,?,?,?,?)",
-            (f.get("tarikh") or today(), f.get("account","Cash in Hand"),
-             f.get("qism","Cash In"), f.get("tafseel",""),
-             rakam, session.get("naam","")))
-        db.commit()
-        session.setdefault('_flashes',[]).append(("success","Entry save ho gayi!"))
-        return redirect("/ledger")
-
-    acc_filter = request.args.get("acc","")
-    if acc_filter:
-        rows = db.execute("SELECT * FROM ledger WHERE account=? ORDER BY tarikh ASC, created_at ASC", (acc_filter,)).fetchall()
-    else:
-        rows = db.execute("SELECT * FROM ledger ORDER BY tarikh ASC, created_at ASC").fetchall()
-
-    # balances per account
-    balances = {}
-    for acc in ACCOUNTS:
-        cash_in  = db.execute("SELECT COALESCE(SUM(rakam),0) FROM ledger WHERE account=? AND qism IN ('Cash In','Opening Balance')",(acc,)).fetchone()[0]
-        cash_out = db.execute("SELECT COALESCE(SUM(rakam),0) FROM ledger WHERE account=? AND qism='Cash Out'",(acc,)).fetchone()[0]
-        balances[acc] = cash_in - cash_out
-
-    total_balance = sum(balances.values())
-    db.close()
-
-    # account filter buttons
-    acc_btns = f"<a href='/ledger' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px'>Sab</a>"
-    for acc in ACCOUNTS:
-        bal = balances[acc]
-        col = "#16A34A" if bal >= 0 else "#DC2626"
-        acc_btns += f"<a href='/ledger?acc={acc}' class='btn {'bp' if acc_filter==acc else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;border:1px solid #E2E8F0'>{acc}<br><span style='font-size:10px;color:{col}'>{pk(bal)}</span></a>"
-
-    # table rows with running balance
-    running = {}
-    trs = ""
-    if not rows:
-        trs = "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:16px'>Koi entry nahi — pehle Opening Balance add karein</td></tr>"
-    else:
-        for r in rows:
-            acc = r['account']
-            if acc not in running: running[acc] = 0
-            if r['qism'] in ('Cash In','Opening Balance'):
-                running[acc] += r['rakam']
-                sign = "+"
-                amt_col = "g"
-            else:
-                running[acc] -= r['rakam']
-                sign = "-"
-                amt_col = "r"
-            bal = running[acc]
-            bal_col = "#16A34A" if bal >= 0 else "#DC2626"
-            qism_badge = "bg-g" if r['qism'] in ('Cash In','Opening Balance') else "bg-r"
-            del_btn = f"<a href='/ledger/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a>" if session.get('role')=='admin' else ""
-            trs += f"""<tr>
-                <td>{r['tarikh']}</td>
-                <td><span class='badge bg-b'>{r['account']}</span></td>
-                <td><span class='badge {qism_badge}'>{r['qism']}</span></td>
-                <td>{r['tafseel'] or '—'}</td>
-                <td class='{amt_col}'><b>{sign} {pk(r['rakam'])}</b></td>
-                <td style='font-weight:700;color:{bal_col}'>{pk(bal)}</td>
-                <td style='color:#9CA3AF;font-size:10px'>{r['darj_kiya']}</td>
-                <td>{del_btn}</td>
-            </tr>"""
-
-    acc_opts = "".join([f"<option>{a}</option>" for a in ACCOUNTS])
-
-    body = f"""{alerts()}
-    <div class="grid">
-      <div class="met"><div class="ml">Kul Balance (Sab)</div><div class="mv {'g' if total_balance>=0 else 'r'}">{pk(total_balance)}</div></div>
-      {''.join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {chr(103) if balances[acc]>=0 else chr(114)}">{pk(balances[acc])}</div></div>' for acc in ACCOUNTS])}
-    </div>
-
-    <div class="card"><div class="ct">Nai Entry Darj Karein</div>
-    <form method="POST" action="/ledger">
-    <div class="fgrid">
-      <div class="fg"><label>Account</label>
-        <select name="account">{acc_opts}</select>
-      </div>
-      <div class="fg"><label>Qism (Type)</label>
-        <select name="qism">
-          <option>Opening Balance</option>
-          <option>Cash In</option>
-          <option>Cash Out</option>
-        </select>
-      </div>
-      <div class="fg"><label>Rakam (PKR)</label>
-        <input name="rakam" type="number" step="0.01" placeholder="0" required>
-      </div>
-      <div class="fg"><label>Tafseel</label>
-        <input name="tafseel" placeholder="e.g. Courier se mila, Vendor ko diya">
-      </div>
-      <div class="fg"><label>Tarikh</label>
-        <input name="tarikh" type="date" id="dt">
-      </div>
-    </div>
-    <button class="btn bp" type="submit">✓ Darj Karein</button>
-    </form></div>
-
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <div class="ct" style="margin:0">Cash & Bank Ledger</div>
-        <a href="/export/ledger" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a>
-      </div>
-      <div style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:4px">{acc_btns}</div>
-      <div class="tw"><table>
-        <thead><tr><th>Tarikh</th><th>Account</th><th>Qism</th><th>Tafseel</th><th>Rakam</th><th>Balance</th><th>Darj Kiya</th><th></th></tr></thead>
-        <tbody>{trs}</tbody>
-      </table></div>
-    </div>
-    <div style="background:#EFF6FF;border-radius:8px;padding:12px;font-size:12px;color:#1E40AF;margin-top:8px">
-      <b>Guide:</b> Opening Balance — shuru ka balance | Cash In — paisa aya | Cash Out — paisa gaya
-    </div>
-    <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
-    return layout("Cash & Bank Ledger", "ldg", body)
-
-@app.route("/ledger/del/<int:i>")
-@login_req
-@admin_req
-def del_ledger(i):
-    db = get_db()
-    db.execute("DELETE FROM ledger WHERE id=?", (i,))
-    db.commit(); db.close()
-    session.setdefault('_flashes',[]).append(("info","Delete ho gaya"))
-    return redirect("/ledger")
-
-# ── COURIER TRACKING API ──────────────────────────────────────────────────────
-import requests as req_lib
-from datetime import datetime, timedelta
+# ── COURIER TRACKING ──────────────────────────────────────────────────────────
+try:
+    import requests as req_lib
+    REQUESTS_OK = True
+except:
+    REQUESTS_OK = False
 
 DAEWOO_BASE = "https://codapi.daewoo.net.pk/"
 DIGI_BASE   = "https://dev.digidokaan.pk/api/v1/digidokaan/"
 
-def get_daewoo_creds():
-    return (os.environ.get("DAEWOO_API_KEY",""),
-            os.environ.get("DAEWOO_API_USER",""),
-            os.environ.get("DAEWOO_API_PASS",""))
-
-def get_digi_token():
-    phone = os.environ.get("DIGI_PHONE","")
-    pwd   = os.environ.get("DIGI_PASS","")
-    if not phone or not pwd:
-        return None, "DigiDokaan credentials Railway pe set nahi"
+def track_daewoo(track_no):
+    if not REQUESTS_OK: return None, "requests library not installed"
+    key  = os.environ.get("DAEWOO_API_KEY","")
+    user = os.environ.get("DAEWOO_API_USER","")
+    pwd  = os.environ.get("DAEWOO_API_PASS","")
+    if not key: return None, "Daewoo API credentials not set in Railway Variables"
     try:
-        r = req_lib.post(DIGI_BASE+"auth/login",
-                        json={"phone": phone, "password": pwd}, timeout=10)
+        r = req_lib.get(f"{DAEWOO_BASE}api/booking/quickTrack?trackingNo={track_no}", timeout=10)
         d = r.json()
-        if d.get("code") == 200:
-            return d.get("token"), None
-        return None, d.get("error","Login failed")
+        if d.get("Result",{}).get("Success"): return d["Result"], None
+        return None, "Tracking number not found"
     except Exception as e:
         return None, str(e)
 
-def track_daewoo(track_no):
-    key, user, pwd = get_daewoo_creds()
-    if not key:
-        return None, "Daewoo API credentials Railway pe set nahi"
+def get_digi_token():
+    if not REQUESTS_OK: return None, "requests library not installed"
+    phone = os.environ.get("DIGI_PHONE","")
+    pwd   = os.environ.get("DIGI_PASS","")
+    if not phone: return None, "DigiDokaan credentials not set in Railway Variables"
     try:
-        url = f"{DAEWOO_BASE}api/booking/quickTrack?trackingNo={track_no}"
-        r = req_lib.get(url, timeout=10)
+        r = req_lib.post(DIGI_BASE+"auth/login", json={"phone":phone,"password":pwd}, timeout=10)
         d = r.json()
-        if d.get("Result",{}).get("Success"):
-            return d["Result"], None
-        return None, "Tracking not found"
+        if d.get("code") == 200: return d.get("token"), None
+        return None, d.get("error","Login failed")
     except Exception as e:
         return None, str(e)
 
 def track_digi(track_no):
     token, err = get_digi_token()
-    if err:
-        return None, err
+    if err: return None, err
     try:
         r = req_lib.post(DIGI_BASE+"get-order-tracking",
                         json={"tracking_no": track_no},
-                        headers={"Authorization": f"Bearer {token}"},
-                        timeout=10)
+                        headers={"Authorization": f"Bearer {token}"}, timeout=10)
         d = r.json()
-        if d.get("code") == 200:
-            return d, None
-        return None, d.get("error","Tracking not found")
+        if d.get("code") == 200: return d, None
+        return None, d.get("error","Not found")
     except Exception as e:
         return None, str(e)
-
-def get_digi_orders():
-    token, err = get_digi_token()
-    if err:
-        return [], err
-    try:
-        r = req_lib.post(DIGI_BASE+"get_shipper_advice_order",
-                        json={"source":"core_api","gateway_id":3},
-                        headers={"Authorization": f"Bearer {token}"},
-                        timeout=10)
-        d = r.json()
-        return d.get("data",[]), None
-    except Exception as e:
-        return [], str(e)
 
 @app.route("/tracking", methods=["GET","POST"])
 @login_req
 def tracking():
-    result     = None
-    error      = None
-    track_no   = ""
-    courier_type = ""
+    result = error = None
+    track_no = courier_type = ""
 
     if request.method == "POST":
         track_no     = request.form.get("track_no","").strip()
@@ -951,311 +966,325 @@ def tracking():
             else:
                 result, error = track_digi(track_no)
 
-    # Build result HTML
     result_html = ""
     if error:
-        result_html = f"<div class='alert al-d'>Error: {error}</div>"
+        result_html = f"<div class='alert al-d'>⚠️ {error}</div>"
     elif result and courier_type == "daewoo":
         cur = result.get("CurrentTrackStatus",[])
         det = result.get("TrackingDetails",[])
         if cur:
             c = cur[0]
-            status_col = "#16A34A" if "DELIVER" in str(c.get("status_name","")).upper() else "#D97706" if "ROUTE" in str(c.get("status_name","")).upper() else "#3B82F6"
+            sc = "#16A34A" if "DELIVER" in str(c.get("status_name","")).upper() else "#D97706"
+            det_rows = "".join([f"<tr><td>{d.get('Date','')}</td><td><span class='badge {'bg-g' if 'DELIVER' in str(d.get('Status','')).upper() else 'bg-w'}'>{d.get('Status','')}</span></td><td>{d.get('TransactionTerminal','')}</td><td>{d.get('Rem','')}</td></tr>" for d in det])
             result_html = f"""
-            <div class="card" style="border-left:4px solid {status_col}">
+            <div class="card" style="border-left:4px solid {sc}">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                 <div class="ct" style="margin:0">Daewoo — {track_no}</div>
-                <span style="background:{status_col};color:#fff;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600">{c.get('status_name','Unknown')}</span>
+                <span style="background:{sc};color:#fff;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600">{c.get('status_name','—')}</span>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
                 <div class="met"><div class="ml">Customer</div><div style="font-size:13px;font-weight:600">{c.get('receiver_name','—')}</div></div>
-                <div class="met"><div class="ml">Contact</div><div style="font-size:13px;font-weight:600">{c.get('receiver_contact1','—')}</div></div>
+                <div class="met"><div class="ml">Contact</div><div style="font-size:13px">{c.get('receiver_contact1','—')}</div></div>
                 <div class="met"><div class="ml">COD Amount</div><div style="font-size:13px;font-weight:600;color:#16A34A">Rs {c.get('amount_cod',0):,}</div></div>
-                <div class="met"><div class="ml">From</div><div style="font-size:13px">{c.get('source_terminal','—')}</div></div>
-                <div class="met"><div class="ml">To</div><div style="font-size:13px">{c.get('destination_terminal','—')}</div></div>
-                <div class="met"><div class="ml">Booking Date</div><div style="font-size:12px">{str(c.get('booking_date_time','—'))[:10]}</div></div>
+                <div class="met"><div class="ml">From</div><div style="font-size:12px">{c.get('source_terminal','—')}</div></div>
+                <div class="met"><div class="ml">To</div><div style="font-size:12px">{c.get('destination_terminal','—')}</div></div>
+                <div class="met"><div class="ml">Booked</div><div style="font-size:12px">{str(c.get('booking_date_time','—'))[:10]}</div></div>
               </div>
               <div class="ct">Tracking History</div>
               <div class="tw"><table>
                 <thead><tr><th>Date</th><th>Status</th><th>Terminal</th><th>Remarks</th></tr></thead>
-                <tbody>{"".join([f'<tr><td>{d.get("Date","")}</td><td><span class="badge {"bg-g" if "DELIVER" in str(d.get("Status","")).upper() else "bg-w"}">{d.get("Status","")}</span></td><td>{d.get("TransactionTerminal","")}</td><td>{d.get("Rem","")}</td></tr>' for d in det])}</tbody>
-              </table></div>
+                <tbody>{det_rows}</tbody></table></div>
             </div>"""
     elif result and courier_type == "digi":
         data = result.get("data",[])
+        rows_html = "".join([f"<tr><td>{d.get('date','') if isinstance(d,dict) else ''}</td><td>{d.get('status','') if isinstance(d,dict) else str(d)}</td><td>{d.get('details','') if isinstance(d,dict) else ''}</td></tr>" for d in (data or [{"date":"—","status":"No history","details":""}])])
         result_html = f"""
         <div class="card" style="border-left:4px solid #3B82F6">
           <div class="ct">DigiDokaan — {track_no}</div>
           <div class="tw"><table>
             <thead><tr><th>Date</th><th>Status</th><th>Details</th></tr></thead>
-            <tbody>{"".join([f'<tr><td>{str(d)[:20] if isinstance(d,str) else d.get("date","")}</td><td>{d.get("status","") if isinstance(d,dict) else ""}</td><td>{d.get("details","") if isinstance(d,dict) else str(d)}</td></tr>' for d in (data if data else [{"date":"—","status":"No history","details":""}])])}</tbody>
-          </table></div>
+            <tbody>{rows_html}</tbody></table></div>
         </div>"""
 
-    # Stuck parcels from DB
     db = get_db()
-    all_courier = db.execute("SELECT * FROM courier ORDER BY created_at DESC").fetchall()
+    all_co = db.execute("SELECT * FROM courier ORDER BY created_at DESC").fetchall()
     db.close()
 
-    stuck_html = ""
-    stuck_count = 0
-    total_co = len(all_courier)
-    tot_rec  = sum(float(r['mila'] or 0) for r in all_courier)
-    tot_net  = sum(float(r['net_rakam'] or 0) for r in all_courier)
+    total_co = len(all_co)
+    tot_cod  = sum(float(r['total_cod'] or 0) for r in all_co)
+    tot_net  = sum(float(r['net_amount'] or 0) for r in all_co)
 
-    # Check parcels with reference numbers for stuck alert
-    with_ref = [r for r in all_courier if r['reference']]
-    if with_ref:
-        stuck_rows = ""
-        for r in with_ref[-10:]:
-            days_ago = ""
-            try:
-                d = datetime.strptime(str(r['tarikh']), "%Y-%m-%d")
-                diff = (datetime.now() - d).days
-                if diff >= 3:
-                    stuck_count += 1
-                    color = "#DC2626" if diff >= 7 else "#D97706"
-                    stuck_rows += f"<tr><td>{r['tarikh']}</td><td><span class='badge bg-b'>{r['courier_naam']}</span></td><td>{r['reference']}</td><td style='color:{color};font-weight:600'>{diff} din</td><td>{pk(r['net_rakam'])}</td></tr>"
-            except: pass
-        if stuck_rows:
-            stuck_html = f"""
-            <div class="card" style="border-left:4px solid #DC2626;margin-bottom:14px">
-              <div class="ct" style="color:#DC2626">⚠️ Possible Stuck Parcels ({stuck_count})</div>
-              <div style="font-size:11px;color:#6B7280;margin-bottom:8px">3+ din purane records jin ka status unclear hai</div>
-              <div class="tw"><table>
-                <thead><tr><th>Tarikh</th><th>Courier</th><th>Reference</th><th>Kitne Din</th><th>Net Rakam</th></tr></thead>
-                <tbody>{stuck_rows}</tbody>
-              </table></div>
-            </div>"""
-
-    # API credentials status
-    creds_ok_daewoo = bool(os.environ.get("DAEWOO_API_KEY"))
-    creds_ok_digi   = bool(os.environ.get("DIGI_PHONE"))
+    dw_ok = bool(os.environ.get("DAEWOO_API_KEY"))
+    di_ok = bool(os.environ.get("DIGI_PHONE"))
 
     cred_html = f"""
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-      <div style="padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;background:{'#DCFCE7' if creds_ok_daewoo else '#FEE2E2'};color:{'#166534' if creds_ok_daewoo else '#991B1B'}">
-        {'✓' if creds_ok_daewoo else '✗'} Daewoo API {'Connected' if creds_ok_daewoo else 'Not Set'}
+      <div style="padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;background:{'#DCFCE7' if dw_ok else '#FEE2E2'};color:{'#166534' if dw_ok else '#991B1B'}">
+        {'✓' if dw_ok else '✗'} Daewoo API {'Connected' if dw_ok else 'Not Set'}
       </div>
-      <div style="padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;background:{'#DCFCE7' if creds_ok_digi else '#FEE2E2'};color:{'#166534' if creds_ok_digi else '#991B1B'}">
-        {'✓' if creds_ok_digi else '✗'} DigiDokaan API {'Connected' if creds_ok_digi else 'Not Set'}
-      </div>
-      <div style="padding:6px 12px;border-radius:7px;font-size:11px;color:#6B7280;background:#F1F5F9">
-        Railway → Variables mein API keys set karein
+      <div style="padding:6px 12px;border-radius:7px;font-size:11px;font-weight:600;background:{'#DCFCE7' if di_ok else '#FEE2E2'};color:{'#166534' if di_ok else '#991B1B'}">
+        {'✓' if di_ok else '✗'} DigiDokaan API {'Connected' if di_ok else 'Not Set'}
       </div>
     </div>"""
 
-    # Recent courier records from our DB
-    recent_html = ""
-    if all_courier:
-        recent_rows = "".join([f"""<tr>
-            <td>{r['tarikh']}</td>
-            <td><span class='badge bg-b'>{r['courier_naam']}</span></td>
-            <td>{r['qism']}</td>
-            <td>{r['parcel_tadaad'] or 0}</td>
-            <td class='g'><b>{pk(r['mila'])}</b></td>
-            <td class='r'>{pk(r['charges'])}</td>
-            <td><b>{pk(r['net_rakam'])}</b></td>
-            <td>{r['reference'] or '—'}</td>
-            <td>
-              {"<a href='/track_quick/daewoo/"+str(r['reference'])+"' class='btn' style='font-size:10px;padding:3px 8px;background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE'>Track</a>" if r['reference'] else ""}
-            </td>
-          </tr>""" for r in all_courier[:15]])
-        recent_html = f"""
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <div class="ct" style="margin:0">Tamam Courier Records</div>
-            <div style="font-size:11px;color:#6B7280">{total_co} records | Kul Mila: {pk(tot_rec)} | Net: {pk(tot_net)}</div>
-          </div>
-          <div class="tw"><table>
-            <thead><tr><th>Tarikh</th><th>Courier</th><th>Qism</th><th>Parcels</th><th>Mila</th><th>Charges</th><th>Net</th><th>Reference</th><th>Track</th></tr></thead>
-            <tbody>{recent_rows}</tbody>
-          </table></div>
-        </div>"""
+    rec_rows = "".join([f"""<tr>
+        <td>{r['date']}</td>
+        <td><span class='badge bg-b'>{r['courier_name']}</span></td>
+        <td>{r['type']}</td><td>{int(r['parcels'])}</td>
+        <td class='g'><b>{pk(r['total_cod'])}</b></td>
+        <td class='r'>{pk(r['charges'])}</td>
+        <td><b>{pk(r['net_amount'])}</b></td>
+        <td>{r['reference'] or '—'}</td>
+        <td>{"<a href='/tracking' onclick=\"document.querySelector('[name=track_no]').value='"+str(r['reference'])+"';return false\" class='btn' style='font-size:10px;padding:3px 8px;background:#EFF6FF;color:#3B82F6;border:1px solid #BFDBFE'>Track</a>" if r['reference'] else ""}</td>
+        </tr>""" for r in all_co[:15]]) or "<tr><td colspan='9' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
-    body = f"""{alerts()}
+    body = f"""{flashes()}
     {cred_html}
-
-    <!-- SEARCH BOX -->
     <div class="card" style="background:linear-gradient(135deg,#0F172A,#1E3A8A);border:none">
       <div style="color:#fff;font-size:15px;font-weight:700;margin-bottom:4px">📡 Courier Tracking</div>
-      <div style="color:#93C5FD;font-size:12px;margin-bottom:14px">Tracking number daal ke real-time status dekhen</div>
+      <div style="color:#93C5FD;font-size:12px;margin-bottom:14px">Enter tracking number to check real-time status</div>
       <form method="POST" action="/tracking" style="display:flex;gap:8px;flex-wrap:wrap">
-        <input name="track_no" value="{track_no}" placeholder="Tracking number likhein..." 
+        <input name="track_no" value="{track_no}" placeholder="Enter tracking number..."
                style="flex:1;min-width:200px;padding:10px 14px;border:none;border-radius:8px;font-size:13px;background:#fff">
         <select name="courier_type" style="padding:10px 14px;border:none;border-radius:8px;font-size:13px;background:#fff">
           <option value="daewoo" {'selected' if courier_type=='daewoo' else ''}>🚛 Daewoo Express</option>
           <option value="digi" {'selected' if courier_type=='digi' else ''}>📦 DigiDokaan</option>
         </select>
-        <button class="btn bp" type="submit" style="padding:10px 20px;font-size:13px">🔍 Track Karein</button>
+        <button class="btn bp" type="submit" style="padding:10px 20px">🔍 Track</button>
       </form>
     </div>
-
     {result_html}
-    {stuck_html}
-
-    <!-- SUMMARY METRICS -->
     <div class="grid" style="margin-bottom:14px">
-      <div class="met"><div class="ml">Kul Courier Records</div><div class="mv b">{total_co}</div></div>
-      <div class="met"><div class="ml">Kul Mila</div><div class="mv g">{pk(tot_rec)}</div></div>
+      <div class="met"><div class="ml">Total Courier Records</div><div class="mv b">{total_co}</div></div>
+      <div class="met"><div class="ml">Total COD</div><div class="mv g">{pk(tot_cod)}</div></div>
       <div class="met"><div class="ml">Net Income</div><div class="mv g">{pk(tot_net)}</div></div>
-      <div class="met"><div class="ml">Stuck Alert</div><div class="mv {'r' if stuck_count>0 else 'g'}">{stuck_count} parcels</div></div>
     </div>
+    <div class="card">
+      <div class="ct">Courier Records</div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Courier</th><th>Type</th><th>Parcels</th><th>Total COD</th><th>Charges</th><th>Net</th><th>Reference</th><th>Track</th></tr></thead>
+        <tbody>{rec_rows}</tbody></table></div></div>"""
+    return layout("Courier Tracking", "trk", body)
 
-    {recent_html}
-    """
-    return layout("📡 Courier Tracking", "trk", body)
-
-@app.route("/track_quick/<courier>/<ref>")
-@login_req
-def track_quick(courier, ref):
-    session['_track_no'] = ref
-    session['_courier']  = courier
-    return redirect(f"/tracking?auto=1&trk={ref}&c={courier}")
-
-# ── EXPORT CSV ────────────────────────────────────────────────────────────────
-import csv, io
-from flask import Response
-
-def make_csv(headers, rows):
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(headers)
-    writer.writerows(rows)
-    output.seek(0)
-    return Response(
-        "\ufeff" + output.getvalue(),
-        mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment"}
-    )
-
-@app.route("/export/ledger")
-@login_req
-def export_ledger():
-    db = get_db()
-    rows = db.execute("SELECT tarikh,account,qism,tafseel,rakam,darj_kiya FROM ledger ORDER BY tarikh ASC, created_at ASC").fetchall()
-    db.close()
-    resp = make_csv(
-        ["Tarikh","Account","Qism","Tafseel","Rakam","Darj Kiya"],
-        [list(r) for r in rows]
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=cash_bank_ledger.csv"
+# ── EXPORTS ───────────────────────────────────────────────────────────────────
+def make_csv(headers, rows, filename):
+    out = io.StringIO()
+    csv.writer(out).writerow(headers)
+    for r in rows: csv.writer(out).writerow(r)
+    out.seek(0)
+    resp = Response("\ufeff"+out.getvalue(), mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return resp
 
-@app.route("/export/kharidari")
+@app.route("/export/purchases")
 @login_req
-def export_kharidari():
+def exp_purchases():
     db = get_db()
-    rows = db.execute("SELECT tarikh,vendor,maal,qty,unit,daam,kul_rakam,status,notes,darj_kiya FROM kharidari ORDER BY created_at DESC").fetchall()
+    rows = db.execute("SELECT date,vendor,product,quantity,unit,per_unit_price,total_amount,status,notes,added_by FROM purchases ORDER BY date DESC").fetchall()
     db.close()
-    resp = make_csv(
-        ["Tarikh","Vendor","Maal","Qty","Unit","Daam per Unit","Kul Rakam","Status","Notes","Darj Kiya"],
-        [list(r) for r in rows]
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=kharidari.csv"
-    return resp
+    return make_csv(["Date","Vendor","Product","Qty","Unit","Per Unit Price","Total Amount","Status","Notes","Added By"],[list(r) for r in rows],"purchases.csv")
 
-@app.route("/export/akhrajaat")
+@app.route("/export/expenses")
 @login_req
-def export_akhrajaat():
+def exp_expenses():
     db = get_db()
-    rows = db.execute("SELECT tarikh,head,tafseel,kise_diya,rakam,tariqa,darj_kiya FROM akhrajaat ORDER BY created_at DESC").fetchall()
+    rows = db.execute("SELECT date,category,description,paid_to,amount,payment_method,added_by FROM expenses ORDER BY date DESC").fetchall()
     db.close()
-    resp = make_csv(
-        ["Tarikh","Head","Tafseel","Kise Diya","Rakam","Tariqa","Darj Kiya"],
-        [list(r) for r in rows]
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=akhrajaat.csv"
-    return resp
+    return make_csv(["Date","Category","Description","Paid To","Amount","Payment Method","Added By"],[list(r) for r in rows],"expenses.csv")
 
 @app.route("/export/courier")
 @login_req
-def export_courier():
+def exp_courier():
     db = get_db()
-    rows = db.execute("SELECT tarikh,courier_naam,qism,parcel_tadaad,mila,charges,net_rakam,reference,darj_kiya FROM courier ORDER BY created_at DESC").fetchall()
+    rows = db.execute("SELECT date,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by FROM courier ORDER BY date DESC").fetchall()
     db.close()
-    resp = make_csv(
-        ["Tarikh","Courier","Qism","Parcel Tadaad","Mila","Charges","Net Rakam","Reference","Darj Kiya"],
-        [list(r) for r in rows]
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=courier.csv"
-    return resp
+    return make_csv(["Date","Courier","Type","Parcels","Total COD","Charges","Net Amount","Reference","Added By"],[list(r) for r in rows],"courier.csv")
 
 @app.route("/export/investment")
 @login_req
 @admin_req
-def export_investment():
+def exp_investment():
     db = get_db()
-    rows = db.execute("SELECT tarikh,tafseel,rakam,darj_kiya FROM investment ORDER BY created_at DESC").fetchall()
+    rows = db.execute("SELECT date,description,amount,added_by FROM investment ORDER BY date DESC").fetchall()
     db.close()
-    resp = make_csv(
-        ["Tarikh","Tafseel","Rakam","Darj Kiya"],
-        [list(r) for r in rows]
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=investment.csv"
-    return resp
+    return make_csv(["Date","Description","Amount","Added By"],[list(r) for r in rows],"investment.csv")
 
-@app.route("/export/loan")
+@app.route("/export/loans")
 @login_req
 @admin_req
-def export_loan():
+def exp_loans():
     db = get_db()
-    rows = db.execute("SELECT tarikh,shakhs,qism,rakam,darj_kiya FROM loan ORDER BY created_at DESC").fetchall()
+    rows = db.execute("SELECT date,person,type,amount,added_by FROM loans ORDER BY date DESC").fetchall()
     db.close()
-    resp = make_csv(
-        ["Tarikh","Shakhs","Qism","Rakam","Darj Kiya"],
-        [list(r) for r in rows]
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=loan.csv"
-    return resp
+    return make_csv(["Date","Person","Type","Amount","Added By"],[list(r) for r in rows],"loans.csv")
+
+@app.route("/export/cashbank")
+@login_req
+def exp_cashbank():
+    db = get_db()
+    rows = db.execute("SELECT date,account,type,description,amount,added_by FROM cashbank ORDER BY date ASC").fetchall()
+    db.close()
+    return make_csv(["Date","Account","Type","Description","Amount","Added By"],[list(r) for r in rows],"cash_bank.csv")
 
 @app.route("/export/all")
 @login_req
 @admin_req
-def export_all():
+def exp_all():
     db = get_db()
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    writer.writerow(["=== KHARIDARI ==="])
-    writer.writerow(["Tarikh","Vendor","Maal","Qty","Unit","Daam","Kul Rakam","Status","Notes"])
-    for r in db.execute("SELECT tarikh,vendor,maal,qty,unit,daam,kul_rakam,status,notes FROM kharidari ORDER BY tarikh DESC").fetchall():
-        writer.writerow(list(r))
-
-    writer.writerow([])
-    writer.writerow(["=== AKHRAJAAT ==="])
-    writer.writerow(["Tarikh","Head","Tafseel","Kise Diya","Rakam","Tariqa"])
-    for r in db.execute("SELECT tarikh,head,tafseel,kise_diya,rakam,tariqa FROM akhrajaat ORDER BY tarikh DESC").fetchall():
-        writer.writerow(list(r))
-
-    writer.writerow([])
-    writer.writerow(["=== COURIER ==="])
-    writer.writerow(["Tarikh","Courier","Qism","Parcels","Mila","Charges","Net Rakam","Reference"])
-    for r in db.execute("SELECT tarikh,courier_naam,qism,parcel_tadaad,mila,charges,net_rakam,reference FROM courier ORDER BY tarikh DESC").fetchall():
-        writer.writerow(list(r))
-
-    writer.writerow([])
-    writer.writerow(["=== INVESTMENT ==="])
-    writer.writerow(["Tarikh","Tafseel","Rakam"])
-    for r in db.execute("SELECT tarikh,tafseel,rakam FROM investment ORDER BY tarikh DESC").fetchall():
-        writer.writerow(list(r))
-
-    writer.writerow([])
-    writer.writerow(["=== LOAN ==="])
-    writer.writerow(["Tarikh","Shakhs","Qism","Rakam"])
-    for r in db.execute("SELECT tarikh,shakhs,qism,rakam FROM loan ORDER BY tarikh DESC").fetchall():
-        writer.writerow(list(r))
-
+    out = io.StringIO()
+    w = csv.writer(out)
+    sections = [
+        ("PURCHASES",["Date","Vendor","Product","Qty","Unit","Per Unit","Total","Status"],"SELECT date,vendor,product,quantity,unit,per_unit_price,total_amount,status FROM purchases ORDER BY date DESC"),
+        ("EXPENSES",["Date","Category","Description","Paid To","Amount"],"SELECT date,category,description,paid_to,amount FROM expenses ORDER BY date DESC"),
+        ("COURIER",["Date","Courier","Type","Parcels","Total COD","Charges","Net"],"SELECT date,courier_name,type,parcels,total_cod,charges,net_amount FROM courier ORDER BY date DESC"),
+        ("INVESTMENT",["Date","Description","Amount"],"SELECT date,description,amount FROM investment ORDER BY date DESC"),
+        ("LOANS",["Date","Person","Type","Amount"],"SELECT date,person,type,amount FROM loans ORDER BY date DESC"),
+    ]
+    for name, headers, query in sections:
+        w.writerow([]); w.writerow([f"=== {name} ==="]);  w.writerow(headers)
+        for r in db.execute(query).fetchall(): w.writerow(list(r))
     db.close()
-    output.seek(0)
-    resp = Response(
-        "\ufeff" + output.getvalue(),
-        mimetype="text/csv; charset=utf-8"
-    )
-    resp.headers["Content-Disposition"] = "attachment; filename=bizhisaab_poora_data.csv"
+    out.seek(0)
+    resp = Response("\ufeff"+out.getvalue(), mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = "attachment; filename=bizhisaab_all_data.csv"
     return resp
 
-# ── START ──────────────────────────────────────────────────────────────────────
+# ── IMPORT CSV ────────────────────────────────────────────────────────────────
+@app.route("/import", methods=["GET","POST"])
+@login_req
+@admin_req
+def import_data():
+    if request.method == "POST":
+        f    = request.files.get("file")
+        dtype= request.form.get("type","purchases")
+        if not f:
+            session.setdefault('_flashes',[]).append(("danger","Please select a file"))
+            return redirect("/import")
+        try:
+            import io as _io
+            content = f.read().decode("utf-8-sig")
+            reader  = csv.DictReader(_io.StringIO(content))
+            rows    = list(reader)
+            db      = get_db()
+            count   = 0
+            for r in rows:
+                try:
+                    if dtype == "purchases":
+                        qty   = float(r.get("quantity") or r.get("Qty") or 1)
+                        total = float(r.get("total_amount") or r.get("Total Amount") or r.get("Kul Rakam") or 0)
+                        per_u = round(total/qty,2) if qty else 0
+                        st    = r.get("status") or r.get("Status","Paid")
+                        st    = st.replace("Paid (Ada)","Paid").replace("Unpaid (Baqi)","Unpaid").replace("Partial (Adha)","Partial")
+                        db.execute("""INSERT INTO purchases
+                            (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                            (r.get("date") or r.get("Tarikh") or today(),
+                             r.get("vendor") or r.get("Vendor",""),
+                             r.get("product") or r.get("Product") or r.get("Maal",""),
+                             qty,
+                             r.get("unit") or r.get("Unit","Piece"),
+                             total, per_u, st,
+                             r.get("notes") or r.get("Notes",""),
+                             r.get("added_by") or session.get("naam","")))
+                        count += 1
+                    elif dtype == "expenses":
+                        db.execute("""INSERT INTO expenses
+                            (date,category,description,paid_to,amount,payment_method,added_by)
+                            VALUES (?,?,?,?,?,?,?)""",
+                            (r.get("date") or r.get("Tarikh") or today(),
+                             r.get("category") or r.get("Head",""),
+                             r.get("description") or r.get("Tafseel",""),
+                             r.get("paid_to") or r.get("Kise Diya",""),
+                             float(r.get("amount") or r.get("Rakam") or 0),
+                             r.get("payment_method") or r.get("Tariqa","Cash"),
+                             r.get("added_by") or session.get("naam","")))
+                        count += 1
+                    elif dtype == "investment":
+                        db.execute("INSERT INTO investment (date,description,amount,added_by) VALUES (?,?,?,?)",
+                            (r.get("date") or r.get("Tarikh") or today(),
+                             r.get("description") or r.get("Tafseel",""),
+                             float(r.get("amount") or r.get("Rakam") or 0),
+                             r.get("added_by") or session.get("naam","")))
+                        count += 1
+                    elif dtype == "loans":
+                        tp = r.get("type") or r.get("Qism","Loan Taken")
+                        tp = tp.replace("Loan Liya","Loan Taken").replace("Loan Wapas","Loan Repaid")
+                        db.execute("INSERT INTO loans (date,person,type,amount,added_by) VALUES (?,?,?,?,?)",
+                            (r.get("date") or r.get("Tarikh") or today(),
+                             r.get("person") or r.get("Shakhs",""),
+                             tp,
+                             float(r.get("amount") or r.get("Rakam") or 0),
+                             r.get("added_by") or session.get("naam","")))
+                        count += 1
+                    elif dtype == "courier":
+                        cod = float(r.get("total_cod") or r.get("Mila") or 0)
+                        chg = float(r.get("charges") or r.get("Charges") or 0)
+                        db.execute("""INSERT INTO courier
+                            (date,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by)
+                            VALUES (?,?,?,?,?,?,?,?,?)""",
+                            (r.get("date") or r.get("Tarikh") or today(),
+                             r.get("courier_name") or r.get("Courier",""),
+                             r.get("type") or r.get("Qism","COD"),
+                             float(r.get("parcels") or 0),
+                             cod, chg, round(cod-chg,2),
+                             r.get("reference") or r.get("Reference",""),
+                             r.get("added_by") or session.get("naam","")))
+                        count += 1
+                except Exception as row_err:
+                    continue
+            db.commit(); db.close()
+            session.setdefault('_flashes',[]).append(("success",f"✓ {count} records imported successfully!"))
+        except Exception as e:
+            session.setdefault('_flashes',[]).append(("danger",f"Error: {str(e)}"))
+        return redirect("/import")
+
+    body = f"""{flashes()}
+    <div class="card" style="max-width:600px">
+      <div class="ct">Import Data from CSV</div>
+      <div style="background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#92400E">
+        <b>⚠️ Important:</b> Use the converted CSV files provided. Duplicate entries may be created if imported twice.
+      </div>
+      <form method="POST" action="/import" enctype="multipart/form-data">
+        <div class="fgrid">
+          <div class="fg"><label>Data Type</label>
+            <select name="type">
+              <option value="purchases">Purchases</option>
+              <option value="expenses">Expenses</option>
+              <option value="investment">Investment</option>
+              <option value="loans">Loans</option>
+              <option value="courier">Courier</option>
+            </select>
+          </div>
+          <div class="fg"><label>CSV File</label>
+            <input type="file" name="file" accept=".csv" required>
+          </div>
+        </div>
+        <button class="btn bp" type="submit">⬆ Import Data</button>
+      </form>
+    </div>
+    <div class="card" style="max-width:600px">
+      <div class="ct">Import Order (Follow This Sequence)</div>
+      <div style="font-size:12px;line-height:2">
+        <div style="padding:6px 0;border-bottom:1px solid #F1F5F9">
+          <b>1.</b> Select <b>Purchases</b> → Upload <b>purchases_import.csv</b>
+        </div>
+        <div style="padding:6px 0;border-bottom:1px solid #F1F5F9">
+          <b>2.</b> Select <b>Expenses</b> → Upload <b>expenses_import.csv</b>
+        </div>
+        <div style="padding:6px 0;border-bottom:1px solid #F1F5F9">
+          <b>3.</b> Select <b>Investment</b> → Upload <b>investment_import.csv</b>
+        </div>
+        <div style="padding:6px 0;border-bottom:1px solid #F1F5F9">
+          <b>4.</b> Select <b>Loans</b> → Upload <b>loans_import.csv</b>
+        </div>
+        <div style="padding:6px 0">
+          <b>5.</b> Select <b>Courier</b> → Upload <b>courier.csv</b> (original file)
+        </div>
+      </div>
+    </div>"""
+    return layout("Import Data", "imp", body)
+
+# ── START ─────────────────────────────────────────────────────────────────────
 init_db()
 
 if __name__ == "__main__":
