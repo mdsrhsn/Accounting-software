@@ -83,6 +83,8 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS expenses (id SERIAL PRIMARY KEY, date TEXT, category TEXT, description TEXT, paid_to TEXT, amount REAL, payment_method TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS courier (id SERIAL PRIMARY KEY, date TEXT, courier_name TEXT, type TEXT, parcels REAL, total_cod REAL, charges REAL, net_amount REAL, reference TEXT, added_by TEXT, account_name TEXT DEFAULT 'Default', created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS courier_accounts (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, courier TEXT, bank_name TEXT, bank_holder TEXT, active BOOLEAN DEFAULT TRUE)",
+        "CREATE TABLE IF NOT EXISTS ad_accounts (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, platform TEXT, currency TEXT DEFAULT 'PKR', site TEXT, active BOOLEAN DEFAULT TRUE)",
+        "CREATE TABLE IF NOT EXISTS ad_spend (id SERIAL PRIMARY KEY, date TEXT, ad_account_id INT, ad_account_name TEXT, platform TEXT, site TEXT, dollar_amount REAL DEFAULT 0, dollar_rate REAL DEFAULT 0, pkr_amount REAL, tax_amount REAL DEFAULT 0, total_pkr REAL, description TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS investment (id SERIAL PRIMARY KEY, date TEXT, description TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS loans (id SERIAL PRIMARY KEY, date TEXT, person TEXT, type TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS exp_categories (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL)",
@@ -104,7 +106,17 @@ def init_db():
     ]
     for acc in default_accounts:
         cur.execute("INSERT INTO courier_accounts (name,courier,bank_name,bank_holder) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", acc)
-    # Add missing columns if not exist (for existing databases)
+    # Default ad accounts
+    default_ads = [
+        ("Math and Matter", "Facebook", "PKR", "Sehatkart"),
+        ("Facebook Account 2", "Facebook", "USD", ""),
+        ("Facebook Account 3", "Facebook", "USD", ""),
+        ("Facebook Account 4", "Facebook", "USD", ""),
+        ("TikTok Main", "TikTok", "USD", ""),
+    ]
+    for ad in default_ads:
+        cur.execute("INSERT INTO ad_accounts (name,platform,currency,site) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", ad)
+    # Add missing columns
     try:
         cur.execute("ALTER TABLE courier ADD COLUMN IF NOT EXISTS account_name TEXT DEFAULT 'Default'")
     except: conn.rollback()
@@ -157,6 +169,7 @@ def layout(title, page, body):
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
       <a href="/purchases" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
       <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
+      <a href="/adspend" class="{'on' if page=='ads' else ''}">📣 Ad Spend</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/cashbank" class="{'on' if page=='cb' else ''}">💵 Cash & Bank</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
@@ -1091,6 +1104,306 @@ def import_data():
       </div>
     </div>"""
     return layout("Import Data","imp",body)
+
+# ── AD SPEND ──────────────────────────────────────────────────────────────────
+@app.route("/adspend", methods=["GET","POST"])
+@login_req
+def adspend():
+    conn = get_db()
+    ad_accounts = qry(conn,"SELECT * FROM ad_accounts WHERE active=TRUE ORDER BY platform,name").fetchall()
+
+    if request.method == "POST":
+        f = request.form
+        acc_id   = int(f.get("ad_account_id") or 0)
+        acc      = next((a for a in ad_accounts if a['id']==acc_id), None)
+        platform = acc['platform'] if acc else ""
+        site     = f.get("site") or (acc['site'] if acc else "")
+        currency = acc['currency'] if acc else "PKR"
+        acc_name = acc['name'] if acc else ""
+
+        if currency == "USD":
+            dollar_amt  = float(f.get("dollar_amount") or 0)
+            dollar_rate = float(f.get("dollar_rate") or 0)
+            pkr_amt     = round(dollar_amt * dollar_rate, 2)
+            # Tax = difference between billed amount and charged amount
+            billed_pkr  = float(f.get("billed_pkr") or pkr_amt)
+            tax_amt     = round(billed_pkr - pkr_amt, 2)
+            total_pkr   = billed_pkr
+        else:
+            dollar_amt  = 0
+            dollar_rate = 0
+            pkr_amt     = float(f.get("pkr_amount") or 0)
+            tax_amt     = float(f.get("tax_amount") or 0)
+            total_pkr   = round(pkr_amt + tax_amt, 2)
+
+        qry(conn,"""INSERT INTO ad_spend
+            (date,ad_account_id,ad_account_name,platform,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (f.get("date") or today(), acc_id, acc_name, platform, site,
+             dollar_amt, dollar_rate, pkr_amt, tax_amt, total_pkr,
+             f.get("description",""), session.get("naam","")))
+        conn.commit()
+        session.setdefault('_flashes',[]).append(("success","Ad spend saved!"))
+        conn.close()
+        return redirect("/adspend")
+
+    # Filter
+    acc_filter  = request.args.get("acc","")
+    plat_filter = request.args.get("plat","")
+    site_filter = request.args.get("site","")
+
+    sql = "SELECT * FROM ad_spend WHERE 1=1"
+    params = []
+    if acc_filter:  sql += " AND ad_account_name=%s"; params.append(acc_filter)
+    if plat_filter: sql += " AND platform=%s"; params.append(plat_filter)
+    if site_filter: sql += " AND site=%s"; params.append(site_filter)
+    sql += " ORDER BY created_at DESC"
+    rows = qry(conn, sql, params).fetchall()
+
+    # Totals
+    total_pkr = sum(float(r['total_pkr'] or 0) for r in rows)
+    total_tax = sum(float(r['tax_amount'] or 0) for r in rows)
+
+    # Summary by account
+    acc_summary = qry(conn,"""SELECT ad_account_name, platform,
+        COUNT(*) cnt, SUM(total_pkr) total, SUM(tax_amount) tax
+        FROM ad_spend GROUP BY ad_account_name, platform ORDER BY total DESC""").fetchall()
+
+    # Summary by platform
+    plat_summary = qry(conn,"""SELECT platform,
+        COUNT(*) cnt, SUM(total_pkr) total, SUM(tax_amount) tax
+        FROM ad_spend GROUP BY platform ORDER BY total DESC""").fetchall()
+
+    # Summary by site
+    site_summary = qry(conn,"""SELECT site,
+        COUNT(*) cnt, SUM(total_pkr) total
+        FROM ad_spend WHERE site!='' GROUP BY site ORDER BY total DESC""").fetchall()
+
+    # Unique sites for filter
+    all_sites = list(set([r['site'] for r in qry(conn,"SELECT DISTINCT site FROM ad_spend WHERE site!=''").fetchall()]))
+
+    conn.close()
+
+    # Platform colors
+    plat_colors = {"Facebook":"#1877F2","TikTok":"#010101","Google":"#EA4335","Other":"#6B7280"}
+
+    # Account options grouped by platform
+    acc_opts = ""
+    for plat in ["Facebook","TikTok","Google","Other"]:
+        plat_accs = [a for a in ad_accounts if a['platform']==plat]
+        if plat_accs:
+            acc_opts += f"<optgroup label='{plat}'>"
+            for a in plat_accs:
+                curr = f" ({a['currency']})" if a['currency']=='USD' else ""
+                site_info = f" → {a['site']}" if a['site'] else ""
+                acc_opts += f"<option value='{a['id']}'>{a['name']}{curr}{site_info}</option>"
+            acc_opts += "</optgroup>"
+
+    # Account summary cards
+    acc_cards = ""
+    for s in acc_summary:
+        col = plat_colors.get(s['platform'],"#6B7280")
+        acc_cards += f"""<div class="met" style="border-top:3px solid {col}">
+            <div class="ml">{s['ad_account_name']}</div>
+            <div class="mv r">{pk(s['total'])}</div>
+            <div style="font-size:10px;color:{col};margin-top:2px">{s['platform']}</div>
+            <div style="font-size:10px;color:#9CA3AF">Tax: {pk(s['tax'])} | {s['cnt']} entries</div>
+        </div>"""
+
+    # Platform summary
+    plat_cards = ""
+    for s in plat_summary:
+        col = plat_colors.get(s['platform'],"#6B7280")
+        plat_cards += f"""<div class="met" style="border-top:3px solid {col}">
+            <div class="ml">{s['platform']}</div>
+            <div class="mv r">{pk(s['total'])}</div>
+            <div style="font-size:10px;color:#9CA3AF">Tax: {pk(s['tax'])} | {s['cnt']} entries</div>
+        </div>"""
+
+    # Site summary
+    site_cards = "".join([f"""<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px'>
+        <span>{s['site']}</span><span class='r'><b>{pk(s['total'])}</b></span>
+        </div>""" for s in site_summary]) or "<div style='color:#9CA3AF;font-size:12px;padding:8px'>No data</div>"
+
+    # Table rows
+    trs = "".join([f"""<tr>
+        <td>{r['date']}</td>
+        <td><span style='background:{plat_colors.get(r["platform"],"#6B7280")};color:#fff;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600'>{r['platform']}</span></td>
+        <td>{r['ad_account_name']}</td>
+        <td>{r['site'] or '—'}</td>
+        <td style='color:#6B7280;font-size:11px'>{'$'+str(r['dollar_amount']) if r['dollar_amount'] else '—'}</td>
+        <td style='color:#6B7280;font-size:11px'>{str(r['dollar_rate'])+'x' if r['dollar_rate'] else '—'}</td>
+        <td class='r'>{pk(r['pkr_amount'])}</td>
+        <td style='color:#D97706'>{pk(r['tax_amount'])}</td>
+        <td class='r'><b>{pk(r['total_pkr'])}</b></td>
+        <td style='color:#9CA3AF;font-size:10px'>{r['description'] or '—'}</td>
+        <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
+        {'<td><a href="/adspend/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
+        </tr>""" for r in rows]) or "<tr><td colspan='12' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+
+    # Filter buttons
+    plat_btns = f"<a href='/adspend' class='btn {'bp' if not plat_filter else ''}' style='font-size:11px;padding:4px 10px;margin-right:4px;margin-bottom:4px'>All</a>"
+    for p in ["Facebook","TikTok","Google"]:
+        col = plat_colors.get(p,"#6B7280")
+        plat_btns += f"<a href='/adspend?plat={p}' class='btn' style='font-size:11px;padding:4px 10px;margin-right:4px;margin-bottom:4px;background:{''+col if plat_filter==p else '#fff'};color:{'#fff' if plat_filter==p else col};border:1px solid {col}'>{p}</a>"
+
+    # Add account form (admin only)
+    add_acc_form = ""
+    if session.get("role") == "admin":
+        add_acc_form = """<hr style="margin:14px 0;border:none;border-top:1px solid #E2E8F0">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px">Add New Ad Account:</div>
+        <form method="POST" action="/adspend/account/add">
+        <div class="fgrid">
+          <div class="fg"><label>Account Name</label><input name="name" placeholder="e.g. Facebook Account 5" required></div>
+          <div class="fg"><label>Platform</label><select name="platform"><option>Facebook</option><option>TikTok</option><option>Google</option><option>Other</option></select></div>
+          <div class="fg"><label>Currency</label><select name="currency"><option value="PKR">PKR</option><option value="USD">USD (Dollar)</option></select></div>
+          <div class="fg"><label>Site / Product</label><input name="site" placeholder="e.g. Sehatkart, WomenComfort"></div>
+        </div>
+        <button class="btn bs" type="submit">+ Add Account</button>
+        </form>"""
+
+    body = f"""{flashes()}
+
+    <!-- SUMMARIES -->
+    <div class="g2" style="margin-bottom:14px">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:6px">BY PLATFORM</div>
+        <div class="grid">{plat_cards or '<div style="color:#9CA3AF;font-size:12px">No data</div>'}</div>
+      </div>
+      <div class="card"><div class="ct">By Site/Product</div>{site_cards}</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:6px">BY AD ACCOUNT</div>
+    <div class="grid" style="margin-bottom:14px">{acc_cards or '<div style="color:#9CA3AF;font-size:12px">No data</div>'}</div>
+
+    <!-- ADD FORM -->
+    <div class="card"><div class="ct">Add Ad Spend</div>
+    <form method="POST" action="/adspend">
+    <div class="fgrid">
+      <div class="fg"><label>Ad Account</label>
+        <select name="ad_account_id" id="acc_sel" onchange="onAccChange(this)">
+          {acc_opts}
+        </select>
+      </div>
+      <div class="fg"><label>Site / Product</label>
+        <input name="site" id="site_inp" placeholder="Which site/product?">
+      </div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
+      <div class="fg"><label>Description</label><input name="description" placeholder="Campaign details"></div>
+    </div>
+
+    <!-- USD fields -->
+    <div id="usd_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 Dollar Account</div>
+      <div class="fgrid">
+        <div class="fg"><label>Dollar Amount Spent ($)</label><input name="dollar_amount" type="number" step="0.01" placeholder="0.00" id="d_amt" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Rate (1$=?PKR)</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 293.5" id="d_rate" oninput="calcUSD()"></div>
+        <div class="fg"><label>Actual PKR Charged (bill pe)</label><input name="billed_pkr" type="number" step="0.01" placeholder="Actual amount charged" id="d_billed" oninput="calcUSD()"></div>
+        <div class="fg"><label>Tax (auto)</label><input id="d_tax" readonly style="background:#F8FAFC;color:#D97706" placeholder="Auto calculated"></div>
+      </div>
+      <div class="calc-info"><span>Dollar: <b id="d_show">$0</b></span><span>Rate: <b id="r_show">0</b></span><span>Base PKR: <b id="p_show">Rs 0</b></span><span>Tax: <b id="t_show" style="color:#D97706">Rs 0</b></span><span>Total: <b id="tot_show" style="color:#DC2626">Rs 0</b></span></div>
+    </div>
+
+    <!-- PKR fields -->
+    <div id="pkr_fields">
+      <div class="fgrid">
+        <div class="fg"><label>Amount (PKR)</label><input name="pkr_amount" type="number" step="0.01" placeholder="0" id="p_amt" oninput="calcPKR()"></div>
+        <div class="fg"><label>Tax Amount (PKR)</label><input name="tax_amount" type="number" step="0.01" placeholder="0" id="p_tax" oninput="calcPKR()"></div>
+        <div class="fg"><label>Total (auto)</label><input id="p_tot" readonly style="background:#F8FAFC;color:#DC2626" placeholder="Auto calculated"></div>
+      </div>
+    </div>
+
+    <button class="btn bp" type="submit">✓ Save Ad Spend</button>
+    </form>
+    {add_acc_form}
+    </div>
+
+    <!-- RECORDS TABLE -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div class="ct" style="margin:0">Ad Spend Records — Total: <span class="r">{pk(total_pkr)}</span> | Tax: <span style="color:#D97706">{pk(total_tax)}</span></div>
+        <a href="/export/adspend" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div style="margin-bottom:10px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
+        <span style="font-size:11px;color:#6B7280;margin-right:4px">Platform:</span>{plat_btns}
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Platform</th><th>Account</th><th>Site</th><th>Dollar</th><th>Rate</th><th>Base PKR</th><th>Tax</th><th>Total PKR</th><th>Description</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+        <tbody>{trs}</tbody></table></div></div>
+
+    <script>
+    document.getElementById('dt').valueAsDate=new Date();
+    var accCurrency = {{{",".join([f'"{a["id"]}":"{a["currency"]}"' for a in ad_accounts])}}};
+    var accSite = {{{",".join([f'"{a["id"]}":"{a["site"]}"' for a in ad_accounts])}}};
+    function onAccChange(sel){{
+      var id = sel.value;
+      var curr = accCurrency[id] || 'PKR';
+      var site = accSite[id] || '';
+      document.getElementById('site_inp').value = site;
+      if(curr==='USD'){{
+        document.getElementById('usd_fields').style.display='block';
+        document.getElementById('pkr_fields').style.display='none';
+      }} else {{
+        document.getElementById('usd_fields').style.display='none';
+        document.getElementById('pkr_fields').style.display='block';
+      }}
+    }}
+    function calcUSD(){{
+      var d=parseFloat(document.getElementById('d_amt').value)||0;
+      var r=parseFloat(document.getElementById('d_rate').value)||0;
+      var b=parseFloat(document.getElementById('d_billed').value)||0;
+      var base=Math.round(d*r);
+      var tax=Math.round(b-base);
+      document.getElementById('d_tax').value='Rs '+tax.toLocaleString();
+      document.getElementById('d_show').textContent='$'+d.toLocaleString();
+      document.getElementById('r_show').textContent=r;
+      document.getElementById('p_show').textContent='Rs '+base.toLocaleString();
+      document.getElementById('t_show').textContent='Rs '+tax.toLocaleString();
+      document.getElementById('tot_show').textContent='Rs '+Math.round(b).toLocaleString();
+    }}
+    function calcPKR(){{
+      var p=parseFloat(document.getElementById('p_amt').value)||0;
+      var t=parseFloat(document.getElementById('p_tax').value)||0;
+      document.getElementById('p_tot').value='Rs '+Math.round(p+t).toLocaleString();
+    }}
+    onAccChange(document.getElementById('acc_sel'));
+    </script>"""
+    return layout("Ad Spend","ads",body)
+
+@app.route("/adspend/del/<int:i>")
+@login_req
+@admin_req
+def del_adspend(i):
+    conn = get_db()
+    qry(conn,"DELETE FROM ad_spend WHERE id=%s",(i,))
+    conn.commit(); conn.close()
+    session.setdefault('_flashes',[]).append(("info","Deleted"))
+    return redirect("/adspend")
+
+@app.route("/adspend/account/add", methods=["POST"])
+@login_req
+@admin_req
+def add_ad_account():
+    f = request.form
+    conn = get_db()
+    try:
+        qry(conn,"INSERT INTO ad_accounts (name,platform,currency,site) VALUES (%s,%s,%s,%s)",
+            (f.get("name",""), f.get("platform","Facebook"), f.get("currency","PKR"), f.get("site","")))
+        conn.commit()
+        session.setdefault('_flashes',[]).append(("success",f"Account '{f.get('name')}' added!"))
+    except:
+        conn.rollback()
+        session.setdefault('_flashes',[]).append(("danger","Account already exists!"))
+    conn.close()
+    return redirect("/adspend")
+
+@app.route("/export/adspend")
+@login_req
+def exp_adspend():
+    conn = get_db()
+    rows = qry(conn,"SELECT date,platform,ad_account_name,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by FROM ad_spend ORDER BY date DESC").fetchall()
+    conn.close()
+    return make_csv(["Date","Platform","Account","Site","Dollar Amt","Rate","Base PKR","Tax","Total PKR","Description","Added By"],rows,"ad_spend.csv")
 
 # ── EXPORTS ───────────────────────────────────────────────────────────────────
 def make_csv(headers, rows, filename):
