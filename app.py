@@ -81,7 +81,8 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT 'employee', naam TEXT)",
         "CREATE TABLE IF NOT EXISTS purchases (id SERIAL PRIMARY KEY, date TEXT, vendor TEXT, product TEXT, quantity REAL, unit TEXT, total_amount REAL, per_unit_price REAL, status TEXT, notes TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS expenses (id SERIAL PRIMARY KEY, date TEXT, category TEXT, description TEXT, paid_to TEXT, amount REAL, payment_method TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
-        "CREATE TABLE IF NOT EXISTS courier (id SERIAL PRIMARY KEY, date TEXT, courier_name TEXT, type TEXT, parcels REAL, total_cod REAL, charges REAL, net_amount REAL, reference TEXT, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
+        "CREATE TABLE IF NOT EXISTS courier (id SERIAL PRIMARY KEY, date TEXT, courier_name TEXT, type TEXT, parcels REAL, total_cod REAL, charges REAL, net_amount REAL, reference TEXT, added_by TEXT, account_name TEXT DEFAULT 'Default', created_at TIMESTAMP DEFAULT NOW())",
+        "CREATE TABLE IF NOT EXISTS courier_accounts (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, courier TEXT, bank_name TEXT, bank_holder TEXT, active BOOLEAN DEFAULT TRUE)",
         "CREATE TABLE IF NOT EXISTS investment (id SERIAL PRIMARY KEY, date TEXT, description TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS loans (id SERIAL PRIMARY KEY, date TEXT, person TEXT, type TEXT, amount REAL, added_by TEXT, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS exp_categories (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL)",
@@ -94,6 +95,15 @@ def init_db():
             ("admin", generate_password_hash("admin123"), "admin", "Mudassar"))
     for c in ["Transport/Rickshaw","Rent","Salaries","Marketing & Ads","Utilities","Packaging","Shipping","Bank Charges","Miscellaneous"]:
         cur.execute("INSERT INTO exp_categories (name) VALUES (%s) ON CONFLICT DO NOTHING", (c,))
+    # Default courier accounts
+    default_accounts = [
+        ("Pakmade", "DigiDokaan", "HBL EcomLink", "Mudassar"),
+        ("Fridostore", "DigiDokaan", "Faysal Bank", "Asif"),
+        ("WomenComfort", "DigiDokaan", "HBL", "Muzamil"),
+        ("Home and Glow", "Daewoo", "HBL", "Muzamil"),
+    ]
+    for acc in default_accounts:
+        cur.execute("INSERT INTO courier_accounts (name,courier,bank_name,bank_holder) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", acc)
     conn.commit()
     conn.close()
 
@@ -412,34 +422,92 @@ def add_category():
 @login_req
 def courier():
     conn = get_db()
+    accounts = qry(conn,"SELECT * FROM courier_accounts WHERE active=TRUE ORDER BY name").fetchall()
     if request.method == "POST":
         f   = request.form
         cod = float(f.get("total_cod") or 0)
         chg = float(f.get("charges") or 0)
-        qry(conn,"INSERT INTO courier (date,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (f.get("date") or today(), f.get("courier_name","TCS"), f.get("type","COD"),
-             float(f.get("parcels") or 0), cod, chg, round(cod-chg,2), f.get("reference",""), session.get("naam","")))
+        acc = f.get("account_name","Default")
+        # Auto-set courier name from account
+        acc_data = next((a for a in accounts if a['name']==acc), None)
+        courier_nm = acc_data['courier'] if acc_data else f.get("courier_name","Other")
+        qry(conn,"INSERT INTO courier (date,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by,account_name) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (f.get("date") or today(), courier_nm, f.get("type","COD"),
+             float(f.get("parcels") or 0), cod, chg, round(cod-chg,2),
+             f.get("reference",""), session.get("naam",""), acc))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Courier payment saved!"))
         return redirect("/courier")
-    rows  = qry(conn,"SELECT * FROM courier ORDER BY created_at DESC").fetchall()
-    t_cod = qry(conn,"SELECT COALESCE(SUM(total_cod),0) as v FROM courier").fetchone()["v"] or 0
-    t_chg = qry(conn,"SELECT COALESCE(SUM(charges),0) as v FROM courier").fetchone()["v"] or 0
+
+    acc_filter = request.args.get("acc","")
+    if acc_filter:
+        rows = qry(conn,"SELECT * FROM courier WHERE account_name=%s ORDER BY created_at DESC",(acc_filter,)).fetchall()
+        t_cod = qry(conn,"SELECT COALESCE(SUM(total_cod),0) as v FROM courier WHERE account_name=%s",(acc_filter,)).fetchone()["v"] or 0
+        t_chg = qry(conn,"SELECT COALESCE(SUM(charges),0) as v FROM courier WHERE account_name=%s",(acc_filter,)).fetchone()["v"] or 0
+    else:
+        rows  = qry(conn,"SELECT * FROM courier ORDER BY created_at DESC").fetchall()
+        t_cod = qry(conn,"SELECT COALESCE(SUM(total_cod),0) as v FROM courier").fetchone()["v"] or 0
+        t_chg = qry(conn,"SELECT COALESCE(SUM(charges),0) as v FROM courier").fetchone()["v"] or 0
+
+    # Per account summary
+    acc_summary = qry(conn,"""SELECT account_name,
+        COUNT(*) as cnt,
+        COALESCE(SUM(total_cod),0) as total_cod,
+        COALESCE(SUM(charges),0) as charges,
+        COALESCE(SUM(net_amount),0) as net
+        FROM courier GROUP BY account_name ORDER BY net DESC""").fetchall()
     conn.close()
 
-    trs = "".join([f"""<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td>
+    # Account filter buttons
+    acc_btns = f"<a href='/courier' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All Accounts</a>"
+    for a in accounts:
+        acc_btns += f"<a href='/courier?acc={a['name']}' class='btn {'bp' if acc_filter==a['name'] else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px;border:1px solid #E2E8F0'>{a['name']}</a>"
+
+    # Account summary cards
+    acc_cards = ""
+    for s in acc_summary:
+        acc_info = next((a for a in accounts if a['name']==s['account_name']), None)
+        bank_info = f"{acc_info['bank_holder']} — {acc_info['bank_name']}" if acc_info else ""
+        acc_cards += f"""<div class="met" style="cursor:pointer" onclick="window.location='/courier?acc={s['account_name']}'">
+            <div class="ml">{s['account_name']}</div>
+            <div class="mv g">{pk(s['net'])}</div>
+            <div style="font-size:10px;color:#6B7280;margin-top:2px">{bank_info}</div>
+            <div style="font-size:10px;color:#9CA3AF">{s['cnt']} records</div>
+        </div>"""
+
+    acc_opts = "".join([f"<option value='{a['name']}'>{a['name']} ({a['courier']} → {a['bank_holder']} {a['bank_name']})</option>" for a in accounts])
+
+    trs = "".join([f"""<tr>
+        <td>{r['date']}</td>
+        <td><span class='badge bg-b'>{r['account_name']}</span></td>
+        <td><span class='badge bg-w'>{r['courier_name']}</span></td>
         <td>{r['type']}</td><td>{int(r['parcels'] or 0)}</td>
-        <td class='g'><b>{pk(r['total_cod'])}</b></td><td class='r'>{pk(r['charges'])}</td>
-        <td><b>{pk(r['net_amount'])}</b></td><td>{r['reference'] or '—'}</td>
+        <td class='g'><b>{pk(r['total_cod'])}</b></td>
+        <td class='r'>{pk(r['charges'])}</td>
+        <td><b>{pk(r['net_amount'])}</b></td>
+        <td>{r['reference'] or '—'}</td>
         <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
         {'<td><a href="/courier/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
-        </tr>""" for r in rows]) or "<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+        </tr>""" for r in rows]) or "<tr><td colspan='11' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
     body = f"""{flashes()}
+
+    <!-- ACCOUNT SUMMARY CARDS -->
+    <div style="margin-bottom:6px;font-size:11px;font-weight:600;color:#6B7280">Account-wise Summary (click to filter)</div>
+    <div class="grid" style="margin-bottom:14px">{acc_cards}</div>
+
     <div class="card"><div class="ct">Add Courier Payment</div>
     <form method="POST" action="/courier">
     <div class="fgrid">
-      <div class="fg"><label>Courier Company</label><select name="courier_name"><option>TCS</option><option>Leopards</option><option>M&P</option><option>BlueEx</option><option>Postex</option><option>Daewoo</option><option>DigiDokaan</option><option>Other</option></select></div>
+      <div class="fg"><label>Account</label>
+        <select name="account_name" id="acc_sel" onchange="setBank(this)">
+          {acc_opts}
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="fg"><label>Bank / Recipient</label>
+        <input id="bank_info" readonly style="background:#F8FAFC;color:#6B7280" placeholder="Auto-filled from account">
+      </div>
       <div class="fg"><label>Payment Type</label><select name="type"><option>COD</option><option>Online/Prepaid</option><option>Settlement</option></select></div>
       <div class="fg"><label>Total COD Amount (PKR)</label><input name="total_cod" type="number" step="0.01" placeholder="0" id="cod" oninput="calc()"></div>
       <div class="fg"><label>Courier Charges (PKR)</label><input name="charges" type="number" step="0.01" placeholder="0" id="chg" oninput="calc()"></div>
@@ -449,24 +517,67 @@ def courier():
     </div>
     <div class="calc-info"><span>Total COD: <b id="cs">Rs 0</b></span><span>Charges: <b id="xs" style="color:#DC2626">Rs 0</b></span><span>Net: <b id="ns" style="color:#16A34A">Rs 0</b></span></div>
     <button class="btn bp" type="submit">✓ Save Payment</button>
-    </form></div>
+    </form>
+    {f'''<hr style="margin:12px 0;border:none;border-top:1px solid #E2E8F0">
+    <div style="font-size:11px;color:#6B7280;margin-bottom:6px">Add New Courier Account:</div>
+    <form method="POST" action="/courier/account/add">
+    <div class="fgrid">
+      <div class="fg"><label>Account Name</label><input name="name" placeholder="e.g. NewStore" required></div>
+      <div class="fg"><label>Courier</label><select name="courier"><option>DigiDokaan</option><option>Daewoo</option><option>TCS</option><option>Leopards</option><option>Other</option></select></div>
+      <div class="fg"><label>Bank Name</label><input name="bank_name" placeholder="e.g. HBL, Faysal Bank"></div>
+      <div class="fg"><label>Account Holder</label><input name="bank_holder" placeholder="e.g. Mudassar"></div>
+    </div>
+    <button class="btn bs" type="submit">+ Add Account</button>
+    </form>''' if session.get('role')=='admin' else ''}
+    </div>
+
     <div class="grid" style="margin-bottom:14px">
+      <div class="met"><div class="ml">{'Account: '+acc_filter if acc_filter else 'All Accounts'}</div><div class="mv" style="font-size:13px;color:#6B7280">Filter Active</div></div>
       <div class="met"><div class="ml">Total COD</div><div class="mv g">{pk(t_cod)}</div></div>
       <div class="met"><div class="ml">Total Charges</div><div class="mv r">{pk(t_chg)}</div></div>
       <div class="met"><div class="ml">Net Amount</div><div class="mv b">{pk(float(t_cod)-float(t_chg))}</div></div>
     </div>
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">All Courier Records</div>
-      <a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
-    </div><div class="tw"><table>
-      <thead><tr><th>Date</th><th>Courier</th><th>Type</th><th>Parcels</th><th>Total COD</th><th>Charges</th><th>Net</th><th>Reference</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
-      <tbody>{trs}</tbody></table></div></div>
-    <script>document.getElementById('dt').valueAsDate=new Date();
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div class="ct" style="margin:0">Courier Records</div>
+        <a href="/export/courier" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+      </div>
+      <div style="margin-bottom:10px;display:flex;flex-wrap:wrap">{acc_btns}</div>
+      <div class="tw"><table>
+        <thead><tr><th>Date</th><th>Account</th><th>Courier</th><th>Type</th><th>Parcels</th><th>Total COD</th><th>Charges</th><th>Net</th><th>Reference</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+        <tbody>{trs}</tbody></table></div></div>
+
+    <script>
+    document.getElementById('dt').valueAsDate=new Date();
+    var bankInfo = {{{",".join([f"'{a['name']}':'{a['bank_holder']} — {a['bank_name']} ({a['courier']})'" for a in accounts])}}};
+    function setBank(sel){{
+      var info = bankInfo[sel.value] || '';
+      document.getElementById('bank_info').value = info;
+    }}
+    setBank(document.getElementById('acc_sel'));
     function calc(){{var c=parseFloat(document.getElementById('cod').value)||0;var x=parseFloat(document.getElementById('chg').value)||0;
     document.getElementById('cs').textContent='Rs '+Math.round(c).toLocaleString();
     document.getElementById('xs').textContent='Rs '+Math.round(x).toLocaleString();
     document.getElementById('ns').textContent='Rs '+Math.round(c-x).toLocaleString();}}</script>"""
     return layout("Courier Payments","co",body)
+
+@app.route("/courier/account/add", methods=["POST"])
+@login_req
+@admin_req
+def add_courier_account():
+    f = request.form
+    conn = get_db()
+    try:
+        qry(conn,"INSERT INTO courier_accounts (name,courier,bank_name,bank_holder) VALUES (%s,%s,%s,%s)",
+            (f.get("name",""), f.get("courier","DigiDokaan"), f.get("bank_name",""), f.get("bank_holder","")))
+        conn.commit()
+        session.setdefault('_flashes',[]).append(("success",f"Account '{f.get('name')}' added!"))
+    except:
+        conn.rollback()
+        session.setdefault('_flashes',[]).append(("danger","Account already exists!"))
+    conn.close()
+    return redirect("/courier")
 
 @app.route("/courier/del/<int:i>")
 @login_req
