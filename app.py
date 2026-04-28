@@ -104,6 +104,10 @@ def init_db():
     ]
     for acc in default_accounts:
         cur.execute("INSERT INTO courier_accounts (name,courier,bank_name,bank_holder) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING", acc)
+    # Add missing columns if not exist (for existing databases)
+    try:
+        cur.execute("ALTER TABLE courier ADD COLUMN IF NOT EXISTS account_name TEXT DEFAULT 'Default'")
+    except: conn.rollback()
     conn.commit()
     conn.close()
 
