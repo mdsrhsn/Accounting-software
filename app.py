@@ -241,6 +241,15 @@ def login():
     <div class="hint">Default: admin / admin123</div>
     </div></body></html>"""
 
+@app.route("/debug/adaccounts")
+@login_req
+def debug_adaccounts():
+    conn = get_db()
+    accs = qry(conn,"SELECT id,name,platform,currency FROM ad_accounts").fetchall()
+    conn.close()
+    result = "<br>".join([f"ID:{a['id']} | {a['name']} | {a['platform']} | Currency:{a['currency']}" for a in accs])
+    return f"<pre>{result}</pre>"
+
 @app.route("/logout")
 def logout():
     session.clear(); return redirect("/")
