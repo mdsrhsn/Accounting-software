@@ -1171,13 +1171,20 @@ def adspend():
         else:
             pkr_type = f.get("pkr_type","dollar")
             if pkr_type == "dollar":
-                # PKR account but dollar purchase
-                dollar_amt  = float(f.get("dollar_amount") or 0)
-                dollar_rate = float(f.get("dollar_rate") or 0)    # purchase rate
-                bill_rate   = float(f.get("billed_pkr") or 0)     # actual bill rate
-                pkr_amt     = round(dollar_amt * bill_rate, 2)     # actual paid
-                tax_amt     = round(dollar_amt * (dollar_rate - bill_rate), 2)  # difference
-                total_pkr   = round(dollar_amt * dollar_rate, 2)   # total cost
+                pkr_paid    = float(f.get("pkr_paid") or 0)
+                buy_rate    = float(f.get("dollar_buy_rate") or 0)
+                spend_rate  = float(f.get("dollar_spend_rate") or 0)
+                if buy_rate > 0 and spend_rate > 0:
+                    d_bought    = pkr_paid / buy_rate
+                    d_spent     = d_bought * (buy_rate / spend_rate)
+                    d_extra     = d_spent - d_bought
+                    tax_amt     = round(d_extra * buy_rate, 2)  # tax = extra × buy rate
+                    total_pkr   = round(pkr_paid + tax_amt, 2)
+                    dollar_amt  = round(d_bought, 2)
+                    dollar_rate = buy_rate
+                    pkr_amt     = pkr_paid
+                else:
+                    dollar_amt = dollar_rate = pkr_amt = tax_amt = total_pkr = 0
             else:
                 # Direct PKR
                 dollar_amt  = 0
@@ -1346,18 +1353,17 @@ def adspend():
     <div id="pkr_usd_fields" style="display:none;background:#EFF6FF;border-radius:8px;padding:12px;margin-bottom:10px">
       <div style="font-size:11px;font-weight:600;color:#1E40AF;margin-bottom:8px">💳 PKR Account — Dollar Purchase</div>
       <div class="fgrid">
-        <div class="fg"><label>Dollar Amount Purchased ($)</label><input name="dollar_amount" type="number" step="0.01" placeholder="e.g. 100" id="pk_damt" oninput="calcPKR_USD()"></div>
-        <div class="fg"><label>Rate Jis Pe Dollar Kharida (1$=?PKR)</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 293.5" id="pk_drate" oninput="calcPKR_USD()"></div>
-        <div class="fg"><label>Actual Rate Jis Pe Bill Kata (1$=?PKR)</label><input name="billed_pkr" type="number" step="0.01" placeholder="e.g. 272" id="pk_brate" oninput="calcPKR_USD()"></div>
+        <div class="fg"><label>PKR Amount (jo aapne diya dollar khareedne ke liye)</label>
+          <input name="pkr_paid" type="number" step="0.01" placeholder="e.g. 601968" id="pk_pkr" oninput="calcPKR_USD()"></div>
+        <div class="fg"><label>Dollar Buy Rate (1$=?PKR — jis rate pe kharida)</label>
+          <input name="dollar_buy_rate" type="number" step="0.01" placeholder="e.g. 293.5" id="pk_buy" oninput="calcPKR_USD()"></div>
+        <div class="fg"><label>Dollar Spend Rate (1$=?PKR — jis rate pe Facebook/TikTok ne charge kiya)</label>
+          <input name="dollar_spend_rate" type="number" step="0.01" placeholder="e.g. 272.5" id="pk_spend" oninput="calcPKR_USD()"></div>
       </div>
-      <div class="calc-info">
-        <span>Purchase Cost: <b id="pk_pcost">Rs 0</b></span>
-        <span>Bill Amount: <b id="pk_bcost">Rs 0</b></span>
-        <span>Tax (Difference): <b id="pk_tax" style="color:#D97706">Rs 0</b></span>
-        <span>Total: <b id="pk_tot" style="color:#DC2626">Rs 0</b></span>
+      <div class="calc-info" id="pk_info" style="flex-direction:column;gap:4px">
+        <div>Dollar Kharida: <b id="pk_d1">$0</b> | Dollar Kata: <b id="pk_d2">$0</b> | Extra Dollar (Tax): <b id="pk_d3" style="color:#D97706">$0</b></div>
+        <div>Tax PKR: <b id="pk_tax_pkr" style="color:#D97706">Rs 0</b> | Total PKR: <b id="pk_tot" style="color:#DC2626">Rs 0</b></div>
       </div>
-      <input type="hidden" name="pkr_amount" id="pk_amt_hidden">
-      <input type="hidden" name="tax_amount" id="pk_tax_hidden">
     </div>
 
     <!-- PKR Account — Direct PKR -->
@@ -1446,19 +1452,20 @@ def adspend():
     }}
 
     function calcPKR_USD(){{
-      var damt  = parseFloat(document.getElementById('pk_damt').value)||0;
-      var drate = parseFloat(document.getElementById('pk_drate').value)||0;
-      var brate = parseFloat(document.getElementById('pk_brate').value)||0;
-      var purchase = Math.round(damt * drate);
-      var bill     = Math.round(damt * brate);
-      var tax      = purchase - bill; // purchase rate - actual rate = tax/difference
-      var total    = purchase; // total aapne kitna diya dollar khareedne mein
-      document.getElementById('pk_pcost').textContent = 'Rs '+purchase.toLocaleString();
-      document.getElementById('pk_bcost').textContent = 'Rs '+bill.toLocaleString();
-      document.getElementById('pk_tax').textContent   = 'Rs '+Math.abs(tax).toLocaleString();
-      document.getElementById('pk_tot').textContent   = 'Rs '+total.toLocaleString();
-      document.getElementById('pk_amt_hidden').value  = bill;
-      document.getElementById('pk_tax_hidden').value  = Math.abs(tax);
+      var pkr      = parseFloat(document.getElementById('pk_pkr').value)||0;
+      var buy_rate = parseFloat(document.getElementById('pk_buy').value)||0;
+      var spd_rate = parseFloat(document.getElementById('pk_spend').value)||0;
+      if(buy_rate<=0 || spd_rate<=0) return;
+      var d_bought = pkr / buy_rate;                    // dollar kharida
+      var d_spent  = d_bought * (buy_rate/spd_rate);   // dollar kata
+      var d_extra  = d_spent - d_bought;                // extra dollar
+      var tax_pkr  = Math.round(d_extra * buy_rate);   // tax = extra × BUY rate (293.5)
+      var total    = pkr + tax_pkr;
+      document.getElementById('pk_d1').textContent      = '$'+d_bought.toFixed(2);
+      document.getElementById('pk_d2').textContent      = '$'+d_spent.toFixed(2);
+      document.getElementById('pk_d3').textContent      = '$'+d_extra.toFixed(2);
+      document.getElementById('pk_tax_pkr').textContent = 'Rs '+tax_pkr.toLocaleString();
+      document.getElementById('pk_tot').textContent     = 'Rs '+Math.round(total).toLocaleString();
     }}
 
     function calcPKR_Direct(){{
