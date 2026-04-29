@@ -1147,9 +1147,9 @@ def adspend():
         acc_name = acc_row['name'] if acc_row else ""
 
         if currency == "USD":
-            dollar_amt  = float(f.get("dollar_amount") or 0)
-            dollar_rate = float(f.get("dollar_rate") or 0)
-            billed_d    = float(f.get("billed_pkr") or dollar_amt)
+            dollar_amt  = float(f.get("usd_spend") or 0)
+            dollar_rate = float(f.get("usd_rate") or 0)
+            billed_d    = float(f.get("usd_billed") or dollar_amt)
             pkr_amt     = round(dollar_amt * dollar_rate, 2)
             tax_amt     = round((billed_d - dollar_amt) * dollar_rate, 2)
             total_pkr   = round(billed_d * dollar_rate, 2)
@@ -1359,9 +1359,9 @@ def adspend():
     <div id="usd_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
       <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 USD Account — Dollar Bill</div>
       <div class="fgrid">
-        <div class="fg"><label>Actual Dollar Spend ($) — e.g. 100</label><input name="dollar_amount" type="number" step="0.01" placeholder="e.g. 100" id="u_spend" oninput="calcUSD()"></div>
-        <div class="fg"><label>Dollar Billed/Charged ($) — e.g. 102 (tax ke baad)</label><input name="billed_pkr" type="number" step="0.01" placeholder="e.g. 102" id="u_billed" oninput="calcUSD()"></div>
-        <div class="fg"><label>Dollar Rate (1$=?PKR) — e.g. 280</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 280" id="u_rate" oninput="calcUSD()"></div>
+        <div class="fg"><label>Actual Dollar Spend ($) — e.g. 100</label><input name="usd_spend" type="number" step="0.01" placeholder="e.g. 100" id="u_spend" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Billed/Charged ($) — e.g. 102 (tax ke baad)</label><input name="usd_billed" type="number" step="0.01" placeholder="e.g. 102" id="u_billed" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Rate (1$=?PKR) — e.g. 280</label><input name="usd_rate" type="number" step="0.01" placeholder="e.g. 280" id="u_rate" oninput="calcUSD()"></div>
       </div>
       <div class="calc-info">
         <span>Spend: <b id="u_s">$0</b></span>
