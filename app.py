@@ -1166,12 +1166,26 @@ def adspend():
         acc_name = acc_row['name'] if acc_row else ""
 
         if currency == "USD":
-            dollar_amt  = float(f.get("usd_spend") or 0)
-            dollar_rate = float(f.get("usd_rate") or 0)
-            billed_d    = float(f.get("usd_billed") or dollar_amt)
-            pkr_amt     = round(dollar_amt * dollar_rate, 2)
-            tax_amt     = round((billed_d - dollar_amt) * dollar_rate, 2)
-            total_pkr   = round(billed_d * dollar_rate, 2)
+            if platform == "Facebook":
+                # Facebook USD - tax % based
+                fb_spend   = float(f.get("fb_usd_spend") or 0)
+                fb_tax_pct = float(f.get("fb_tax_pct") or 0)
+                fb_rate    = float(f.get("fb_usd_rate") or 0)
+                tax_d      = fb_spend * fb_tax_pct / 100
+                total_d    = fb_spend + tax_d
+                dollar_amt = fb_spend
+                dollar_rate= fb_rate
+                pkr_amt    = round(fb_spend * fb_rate, 2)
+                tax_amt    = round(tax_d * fb_rate, 2)
+                total_pkr  = round(total_d * fb_rate, 2)
+            else:
+                # TikTok USD - billed dollars different
+                dollar_amt  = float(f.get("usd_spend") or 0)
+                dollar_rate = float(f.get("usd_rate") or 0)
+                billed_d    = float(f.get("usd_billed") or dollar_amt)
+                pkr_amt     = round(dollar_amt * dollar_rate, 2)
+                tax_amt     = round((billed_d - dollar_amt) * dollar_rate, 2)
+                total_pkr   = round(billed_d * dollar_rate, 2)
         else:
             pkr_type = f.get("pkr_type","dollar")
             if pkr_type == "dollar":
@@ -1384,9 +1398,9 @@ def adspend():
       </div>
     </div>
 
-    <!-- USD Account -->
-    <div id="usd_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 USD Account — Dollar Bill</div>
+    <!-- USD Account - TikTok (billed dollars different) -->
+    <div id="usd_tiktok_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 TikTok USD — Dollar Bill</div>
       <div class="fgrid">
         <div class="fg"><label>Actual Dollar Spend ($) — e.g. 100</label><input name="usd_spend" type="number" step="0.01" placeholder="e.g. 100" id="u_spend" oninput="calcUSD()"></div>
         <div class="fg"><label>Dollar Billed/Charged ($) — e.g. 102 (tax ke baad)</label><input name="usd_billed" type="number" step="0.01" placeholder="e.g. 102" id="u_billed" oninput="calcUSD()"></div>
@@ -1398,6 +1412,23 @@ def adspend():
         <span>Tax ($): <b id="u_td" style="color:#D97706">$0</b></span>
         <span>Rate: <b id="u_r">0</b></span>
         <span>Total PKR: <b id="u_tot" style="color:#DC2626">Rs 0</b></span>
+      </div>
+    </div>
+
+    <!-- USD Account - Facebook (tax % based) -->
+    <div id="usd_facebook_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 Facebook USD — Tax % based</div>
+      <div class="fgrid">
+        <div class="fg"><label>Dollar Spend ($)</label><input name="fb_usd_spend" type="number" step="0.01" placeholder="e.g. 100" id="fb_spend" oninput="calcFBUSD()"></div>
+        <div class="fg"><label>Tax % — e.g. 2 ya 3</label><input name="fb_tax_pct" type="number" step="0.01" placeholder="e.g. 2.5" id="fb_tax_pct" oninput="calcFBUSD()" value="2"></div>
+        <div class="fg"><label>Dollar Rate (1$=?PKR)</label><input name="fb_usd_rate" type="number" step="0.01" placeholder="e.g. 280" id="fb_rate" oninput="calcFBUSD()"></div>
+      </div>
+      <div class="calc-info">
+        <span>Spend: <b id="fb_s">$0</b></span>
+        <span>Tax %: <b id="fb_tp">0%</b></span>
+        <span>Tax $: <b id="fb_td" style="color:#D97706">$0</b></span>
+        <span>Total $: <b id="fb_tot_d">$0</b></span>
+        <span>Total PKR: <b id="fb_tot" style="color:#DC2626">Rs 0</b></span>
       </div>
     </div>
 
@@ -1431,18 +1462,25 @@ def adspend():
     var today=new Date();var fd=new Date(today.getFullYear(),today.getMonth()-1,1);var ld=new Date(today.getFullYear(),today.getMonth(),0);document.getElementById('pf').valueAsDate=fd;document.getElementById('pt').valueAsDate=ld;
     var accCurrency = {{{",".join([f'"{a["id"]}":"{a["currency"]}"' for a in ad_accounts])}}};
     var accSite = {{{",".join([f'"{a["id"]}":"{a["site"]}"' for a in ad_accounts])}}};
+    var accPlatform = {{{",".join([f'"{a["id"]}":"{a["platform"]}"' for a in ad_accounts])}}};
 
     function onAccChange(sel){{
       var id = sel.value;
       var curr = accCurrency[id] || 'PKR';
       var site = accSite[id] || '';
+      var plat = accPlatform[id] || '';
       document.getElementById('site_inp').value = site;
       document.getElementById('pkr_usd_fields').style.display='none';
       document.getElementById('pkr_direct_fields').style.display='none';
-      document.getElementById('usd_fields').style.display='none';
+      document.getElementById('usd_tiktok_fields').style.display='none';
+      document.getElementById('usd_facebook_fields').style.display='none';
       document.getElementById('pkr_type_sel').style.display='none';
       if(curr==='USD'){{
-        document.getElementById('usd_fields').style.display='block';
+        if(plat==='Facebook'){{
+          document.getElementById('usd_facebook_fields').style.display='block';
+        }} else {{
+          document.getElementById('usd_tiktok_fields').style.display='block';
+        }}
       }} else {{
         document.getElementById('pkr_type_sel').style.display='block';
         showPKRType();
@@ -1481,6 +1519,20 @@ def adspend():
       var p = parseFloat(document.getElementById('pd_amt').value)||0;
       var t = parseFloat(document.getElementById('pd_tax').value)||0;
       document.getElementById('pd_tot').value = 'Rs '+Math.round(p+t).toLocaleString();
+    }}
+
+    function calcFBUSD(){{
+      var spend = parseFloat(document.getElementById('fb_spend').value)||0;
+      var pct   = parseFloat(document.getElementById('fb_tax_pct').value)||0;
+      var rate  = parseFloat(document.getElementById('fb_rate').value)||0;
+      var tax_d = spend * pct / 100;
+      var total_d = spend + tax_d;
+      var total_pkr = Math.round(total_d * rate);
+      document.getElementById('fb_s').textContent    = '$'+spend.toFixed(2);
+      document.getElementById('fb_tp').textContent   = pct+'%';
+      document.getElementById('fb_td').textContent   = '$'+tax_d.toFixed(2);
+      document.getElementById('fb_tot_d').textContent= '$'+total_d.toFixed(2);
+      document.getElementById('fb_tot').textContent  = 'Rs '+total_pkr.toLocaleString();
     }}
 
     function calcUSD(){{
