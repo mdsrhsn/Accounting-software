@@ -262,10 +262,11 @@ def dashboard():
     pu  = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0
     ex  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
     co  = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier").fetchone()["v"] or 0
+    tad = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
     inv = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0
     ll  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     lw  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
-    net = float(co) - float(pu) - float(ex)
+    net = float(co) - float(pu) - float(ex) - float(tad)
     rpu = qry(conn,"SELECT * FROM purchases ORDER BY created_at DESC LIMIT 5").fetchall()
     rco = qry(conn,"SELECT * FROM courier ORDER BY created_at DESC LIMIT 5").fetchall()
     rex = qry(conn,"SELECT * FROM expenses ORDER BY created_at DESC LIMIT 5").fetchall()
@@ -284,6 +285,7 @@ def dashboard():
       <div class="met"><div class="ml">Courier Income</div><div class="mv g">{pk(co)}</div></div>
       <div class="met"><div class="ml">Total Purchases</div><div class="mv r">{pk(pu)}</div></div>
       <div class="met"><div class="ml">Total Expenses</div><div class="mv r">{pk(ex)}</div></div>
+      <div class="met"><div class="ml">Ad Spend</div><div class="mv r">{pk(tad)}</div></div>
       <div class="met"><div class="ml">Net Profit/Loss</div><div class="mv {"g" if net>=0 else "r"}">{pk(net)}</div></div>
       <div class="met"><div class="ml">Investment</div><div class="mv b">{pk(inv)}</div></div>
       <div class="met"><div class="ml">Outstanding Loan</div><div class="mv w">{pk(float(ll)-float(lw))}</div></div>
@@ -825,13 +827,22 @@ def pnl():
     tc  = float(qry(conn,"SELECT COALESCE(SUM(charges),0) as v FROM courier").fetchone()["v"] or 0)
     tp  = float(qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0)
     te  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0)
+    tad = float(qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0)
+    tad_tax = float(qry(conn,"SELECT COALESCE(SUM(tax_amount),0) as v FROM ad_spend").fetchone()["v"] or 0)
     ti  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0)
     ll  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0)
     lw  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0)
     cats= qry(conn,"SELECT category, SUM(amount) t FROM expenses GROUP BY category ORDER BY t DESC").fetchall()
+    # Ad spend by platform
+    ad_plats = qry(conn,"SELECT platform, SUM(total_pkr) t FROM ad_spend GROUP BY platform ORDER BY t DESC").fetchall()
     conn.close()
-    nc=tr-tc; gp=tr-tp; np=gp-tc-te
+
+    nc=tr-tc; gp=tr-tp; np=gp-tc-te-tad
+
     cat_rows = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['category']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in cats])
+
+    ad_rows = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['platform']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in ad_plats])
+
     body = f"""{flashes()}
     <div class="card" style="max-width:620px">
       <div class="ct" style="font-size:14px">Profit & Loss Statement</div>
@@ -845,6 +856,10 @@ def pnl():
       <div class="pnl-s">OPERATING EXPENSES</div>
       {cat_rows}
       <div class="pnl-r pnl-t"><span>Total Expenses</span><span class="r">({pk(te)})</span></div>
+      <div class="pnl-s">AD SPEND (Marketing)</div>
+      {ad_rows}
+      <div class="pnl-r"><span style="padding-left:12px;color:#6B7280">Tax on Ads</span><span style="color:#D97706">({pk(tad_tax)})</span></div>
+      <div class="pnl-r pnl-t"><span>Total Ad Spend</span><span class="r">({pk(tad)})</span></div>
       <div class="pnl-grand"><span>NET PROFIT / LOSS</span><span class="{'g' if np>=0 else 'r'}" style="font-size:16px">{pk(np)}</span></div>
       <div class="pnl-s">CAPITAL & LIABILITIES</div>
       <div class="pnl-r"><span>Total Investment</span><span class="b">{pk(ti)}</span></div>
