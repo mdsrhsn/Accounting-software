@@ -1139,7 +1139,7 @@ def adspend():
         if currency == "USD":
             dollar_amt  = float(f.get("dollar_amount") or 0)
             dollar_rate = float(f.get("dollar_rate") or 0)
-            billed_d    = float(f.get("billed_pkr") or dollar_amt)  # billed dollars
+            billed_d    = float(f.get("billed_pkr") or dollar_amt)
             pkr_amt     = round(dollar_amt * dollar_rate, 2)
             tax_amt     = round((billed_d - dollar_amt) * dollar_rate, 2)
             total_pkr   = round(billed_d * dollar_rate, 2)
@@ -1347,20 +1347,19 @@ def adspend():
 
     <!-- USD Account -->
     <div id="usd_fields" style="display:none;background:#FEF3C7;border-radius:8px;padding:12px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 USD Account</div>
+      <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:8px">💵 USD Account — Dollar Bill</div>
       <div class="fgrid">
-        <div class="fg"><label>Dollar Spend (actual, e.g. $100)</label><input name="dollar_amount" type="number" step="0.01" placeholder="e.g. 100" id="u_spend" oninput="calcUSD()"></div>
-        <div class="fg"><label>Dollar Billed (jo kata, e.g. $102)</label><input name="billed_pkr" type="number" step="0.01" placeholder="e.g. 102" id="u_billed" oninput="calcUSD()"></div>
-        <div class="fg"><label>Dollar Rate (1$=?PKR)</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 280" id="u_rate" oninput="calcUSD()"></div>
+        <div class="fg"><label>Actual Dollar Spend ($) — e.g. 100</label><input name="dollar_amount" type="number" step="0.01" placeholder="e.g. 100" id="u_spend" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Billed/Charged ($) — e.g. 102 (tax ke baad)</label><input name="billed_pkr" type="number" step="0.01" placeholder="e.g. 102" id="u_billed" oninput="calcUSD()"></div>
+        <div class="fg"><label>Dollar Rate (1$=?PKR) — e.g. 280</label><input name="dollar_rate" type="number" step="0.01" placeholder="e.g. 280" id="u_rate" oninput="calcUSD()"></div>
       </div>
       <div class="calc-info">
         <span>Spend: <b id="u_s">$0</b></span>
         <span>Billed: <b id="u_b">$0</b></span>
-        <span>Tax: <b id="u_t" style="color:#D97706">$0 = Rs 0</b></span>
+        <span>Tax ($): <b id="u_td" style="color:#D97706">$0</b></span>
+        <span>Rate: <b id="u_r">0</b></span>
         <span>Total PKR: <b id="u_tot" style="color:#DC2626">Rs 0</b></span>
       </div>
-      <input type="hidden" name="pkr_amount" id="u_amt_hidden">
-      <input type="hidden" name="tax_amount" id="u_tax_hidden">
     </div>
 
     <!-- PKR type selector for PKR accounts -->
@@ -1448,14 +1447,12 @@ def adspend():
       var billed = parseFloat(document.getElementById('u_billed').value)||0;
       var rate   = parseFloat(document.getElementById('u_rate').value)||0;
       var tax_d  = billed - spend;
-      var tax_pkr= Math.round(tax_d * rate);
       var tot_pkr= Math.round(billed * rate);
-      document.getElementById('u_s').textContent   = '$'+spend.toLocaleString();
-      document.getElementById('u_b').textContent   = '$'+billed.toLocaleString();
-      document.getElementById('u_t').textContent   = '$'+tax_d.toFixed(2)+' = Rs '+tax_pkr.toLocaleString();
+      document.getElementById('u_s').textContent   = '$'+spend.toFixed(2);
+      document.getElementById('u_b').textContent   = '$'+billed.toFixed(2);
+      document.getElementById('u_td').textContent  = '$'+tax_d.toFixed(2);
+      document.getElementById('u_r').textContent   = rate;
       document.getElementById('u_tot').textContent = 'Rs '+tot_pkr.toLocaleString();
-      document.getElementById('u_amt_hidden').value  = Math.round(spend*rate);
-      document.getElementById('u_tax_hidden').value  = tax_pkr;
     }}
 
     onAccChange(document.getElementById('acc_sel'));
