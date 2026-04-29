@@ -1130,11 +1130,12 @@ def adspend():
     if request.method == "POST":
         f = request.form
         acc_id   = int(f.get("ad_account_id") or 0)
-        acc      = next((a for a in ad_accounts if a['id']==acc_id), None)
-        platform = acc['platform'] if acc else ""
-        site     = f.get("site") or (acc['site'] if acc else "")
-        currency = acc['currency'] if acc else "PKR"
-        acc_name = acc['name'] if acc else ""
+        # Fresh DB se account lo - list pe depend mat karo
+        acc_row  = qry(conn,"SELECT * FROM ad_accounts WHERE id=%s",(acc_id,)).fetchone()
+        platform = acc_row['platform'] if acc_row else ""
+        site     = f.get("site") or (acc_row['site'] if acc_row else "")
+        currency = acc_row['currency'] if acc_row else "PKR"
+        acc_name = acc_row['name'] if acc_row else ""
 
         if currency == "USD":
             dollar_amt  = float(f.get("dollar_amount") or 0)
