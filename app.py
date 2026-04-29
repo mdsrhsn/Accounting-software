@@ -120,6 +120,10 @@ def init_db():
     try:
         cur.execute("ALTER TABLE courier ADD COLUMN IF NOT EXISTS account_name TEXT DEFAULT 'Default'")
     except: conn.rollback()
+    try:
+        cur.execute("ALTER TABLE ad_spend ADD COLUMN IF NOT EXISTS period_from TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE ad_spend ADD COLUMN IF NOT EXISTS period_to TEXT DEFAULT ''")
+    except: conn.rollback()
     conn.commit()
     conn.close()
 
@@ -1194,11 +1198,12 @@ def adspend():
                 total_pkr   = round(pkr_amt + tax_amt, 2)
 
         qry(conn,"""INSERT INTO ad_spend
-            (date,ad_account_id,ad_account_name,platform,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (date,ad_account_id,ad_account_name,platform,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by,period_from,period_to)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (f.get("date") or today(), acc_id, acc_name, platform, site,
              dollar_amt, dollar_rate, pkr_amt, tax_amt, total_pkr,
-             f.get("description",""), session.get("naam","")))
+             f.get("description",""), session.get("naam",""),
+             f.get("period_from",""), f.get("period_to","")))
         conn.commit()
         session.setdefault('_flashes',[]).append(("success","Ad spend saved!"))
         conn.close()
@@ -1293,6 +1298,7 @@ def adspend():
         <td class='r'>{pk(r['pkr_amount'])}</td>
         <td style='color:#D97706'>{pk(r['tax_amount'])}</td>
         <td class='r'><b>{pk(r['total_pkr'])}</b></td>
+        <td style='color:#6B7280;font-size:10px'>{(str(r['period_from'])[:10]+' → '+str(r['period_to'])[:10]) if r.get('period_from') else '—'}</td>
         <td style='color:#9CA3AF;font-size:10px'>{r['description'] or '—'}</td>
         <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
         {'<td><a href="/adspend/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
@@ -1345,7 +1351,9 @@ def adspend():
       <div class="fg"><label>Site / Product</label>
         <input name="site" id="site_inp" placeholder="Which site/product?">
       </div>
-      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
+      <div class="fg"><label>Entry Date</label><input name="date" type="date" id="dt"></div>
+      <div class="fg"><label>Ad Period — From</label><input name="period_from" type="date" id="pf"></div>
+      <div class="fg"><label>Ad Period — To</label><input name="period_to" type="date" id="pt"></div>
       <div class="fg"><label>Description</label><input name="description" placeholder="Campaign details"></div>
     </div>
 
@@ -1415,11 +1423,12 @@ def adspend():
         <span style="font-size:11px;color:#6B7280;margin-right:4px">Platform:</span>{plat_btns}
       </div>
       <div class="tw"><table>
-        <thead><tr><th>Date</th><th>Platform</th><th>Account</th><th>Site</th><th>Dollar</th><th>Rate</th><th>Base PKR</th><th>Tax</th><th>Total PKR</th><th>Description</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+        <thead><tr><th>Date</th><th>Platform</th><th>Account</th><th>Site</th><th>Dollar</th><th>Rate</th><th>Base PKR</th><th>Tax</th><th>Total PKR</th><th>Period</th><th>Description</th><th>Added By</th>{'<th></th>' if is_admin() else ''}</tr></thead>
         <tbody>{trs}</tbody></table></div></div>
 
     <script>
     document.getElementById('dt').valueAsDate=new Date();
+    var today=new Date();var fd=new Date(today.getFullYear(),today.getMonth()-1,1);var ld=new Date(today.getFullYear(),today.getMonth(),0);document.getElementById('pf').valueAsDate=fd;document.getElementById('pt').valueAsDate=ld;
     var accCurrency = {{{",".join([f'"{a["id"]}":"{a["currency"]}"' for a in ad_accounts])}}};
     var accSite = {{{",".join([f'"{a["id"]}":"{a["site"]}"' for a in ad_accounts])}}};
 
