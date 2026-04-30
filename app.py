@@ -827,29 +827,69 @@ def del_cashbank(i):
 @admin_req
 def pnl():
     conn = get_db()
-    tr  = float(qry(conn,"SELECT COALESCE(SUM(total_cod),0) as v FROM courier").fetchone()["v"] or 0)
-    tc  = float(qry(conn,"SELECT COALESCE(SUM(charges),0) as v FROM courier").fetchone()["v"] or 0)
-    tp  = float(qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0)
-    te  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0)
-    tad = float(qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0)
-    tad_tax = float(qry(conn,"SELECT COALESCE(SUM(tax_amount),0) as v FROM ad_spend").fetchone()["v"] or 0)
+
+    # Date filter
+    date_from = request.args.get("from","")
+    date_to   = request.args.get("to","")
+
+    # Build WHERE clause
+    if date_from and date_to:
+        w_courier  = "WHERE date>=%s AND date<=%s"
+        w_purchase = "WHERE date>=%s AND date<=%s AND status!='Unpaid'"
+        w_expense  = "WHERE date>=%s AND date<=%s"
+        w_adspend  = "WHERE date>=%s AND date<=%s"
+        p2 = (date_from, date_to)
+        period_label = f"{date_from} to {date_to}"
+    elif date_from:
+        w_courier  = "WHERE date>=%s"
+        w_purchase = "WHERE date>=%s AND status!='Unpaid'"
+        w_expense  = "WHERE date>=%s"
+        w_adspend  = "WHERE date>=%s"
+        p2 = (date_from,)
+        period_label = f"From {date_from}"
+    elif date_to:
+        w_courier  = "WHERE date<=%s"
+        w_purchase = "WHERE date<=%s AND status!='Unpaid'"
+        w_expense  = "WHERE date<=%s"
+        w_adspend  = "WHERE date<=%s"
+        p2 = (date_to,)
+        period_label = f"Until {date_to}"
+    else:
+        w_courier  = ""
+        w_purchase = "WHERE status!='Unpaid'"
+        w_expense  = ""
+        w_adspend  = ""
+        p2 = ()
+        period_label = "All Time"
+
+    tr  = float(qry(conn,f"SELECT COALESCE(SUM(total_cod),0) as v FROM courier {w_courier}",p2).fetchone()["v"] or 0)
+    tc  = float(qry(conn,f"SELECT COALESCE(SUM(charges),0) as v FROM courier {w_courier}",p2).fetchone()["v"] or 0)
+    tp  = float(qry(conn,f"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases {w_purchase}",p2).fetchone()["v"] or 0)
+    te  = float(qry(conn,f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w_expense}",p2).fetchone()["v"] or 0)
+    tad = float(qry(conn,f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w_adspend}",p2).fetchone()["v"] or 0)
+    tad_tax = float(qry(conn,f"SELECT COALESCE(SUM(tax_amount),0) as v FROM ad_spend {w_adspend}",p2).fetchone()["v"] or 0)
     ti  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0)
     ll  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0)
     lw  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0)
-    cats= qry(conn,"SELECT category, SUM(amount) t FROM expenses GROUP BY category ORDER BY t DESC").fetchall()
-    # Ad spend by platform
-    ad_plats = qry(conn,"SELECT platform, SUM(total_pkr) t FROM ad_spend GROUP BY platform ORDER BY t DESC").fetchall()
+    cats    = qry(conn,f"SELECT category, SUM(amount) t FROM expenses {w_expense} GROUP BY category ORDER BY t DESC",p2).fetchall()
+    ad_plats= qry(conn,f"SELECT platform, SUM(total_pkr) t FROM ad_spend {w_adspend} GROUP BY platform ORDER BY t DESC",p2).fetchall()
     conn.close()
 
     nc=tr-tc; gp=tr-tp; np=gp-tc-te-tad
 
     cat_rows = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['category']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in cats])
-
-    ad_rows = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['platform']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in ad_plats])
+    ad_rows  = "".join([f"<div class='pnl-r'><span style='padding-left:12px'>{r['platform']}</span><span class='r'>({pk(r['t'])})</span></div>" for r in ad_plats])
 
     body = f"""{flashes()}
     <div class="card" style="max-width:620px">
-      <div class="ct" style="font-size:14px">Profit & Loss Statement</div>
+      <!-- Date Filter -->
+      <form method="GET" action="/pnl" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #E2E8F0">
+        <div class="fg" style="margin:0;flex:1;min-width:130px"><label>From Date</label><input name="from" type="date" value="{date_from}" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px"></div>
+        <div class="fg" style="margin:0;flex:1;min-width:130px"><label>To Date</label><input name="to" type="date" value="{date_to}" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px"></div>
+        <button class="btn bp" type="submit" style="padding:7px 16px">🔍 Filter</button>
+        <a href="/pnl" class="btn" style="padding:7px 16px;background:#F1F5F9;color:#6B7280">Reset</a>
+      </form>
+      <div class="ct" style="font-size:14px">Profit & Loss — <span style="color:#3B82F6;font-size:12px">{period_label}</span></div>
       <div class="pnl-s">INCOME — Courier Payments</div>
       <div class="pnl-r"><span>Total COD Received</span><span class="g"><b>{pk(tr)}</b></span></div>
       <div class="pnl-r"><span style="padding-left:12px;color:#6B7280">Courier Charges</span><span class="r">({pk(tc)})</span></div>
