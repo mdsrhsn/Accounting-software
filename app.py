@@ -283,7 +283,7 @@ def dashboard():
     body = f"""{flashes()}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:12px;color:#6B7280">Business Overview</div>
-      {f'<a href="/export/all" class="btn bs" style="font-size:12px">⬇ Export All Data</a>' if is_admin() else ''}
+      {f'<a href="/export/all" class="btn bs" style="font-size:12px">⬇ Export All Data (Excel)</a>' if is_admin() else ''}
     </div>
     {f'''<div class="grid">
       <div class="met"><div class="ml">Courier Income</div><div class="mv g">{pk(co)}</div></div>
@@ -888,6 +888,7 @@ def pnl():
         <div class="fg" style="margin:0;flex:1;min-width:130px"><label>To Date</label><input name="to" type="date" value="{date_to}" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px"></div>
         <button class="btn bp" type="submit" style="padding:7px 16px">🔍 Filter</button>
         <a href="/pnl" class="btn" style="padding:7px 16px;background:#F1F5F9;color:#6B7280">Reset</a>
+        <a href="/export/pnl?from={date_from}&to={date_to}" class="btn bs" style="padding:7px 16px">⬇ Export P&L</a>
       </form>
       <div class="ct" style="font-size:14px">Profit & Loss — <span style="color:#3B82F6;font-size:12px">{period_label}</span></div>
       <div class="pnl-s">INCOME — Courier Payments</div>
@@ -1688,6 +1689,77 @@ def exp_cashbank():
     conn.close()
     return make_csv(["Date","Account","Type","Description","Amount","Added By"],rows,"cash_bank.csv")
 
+@app.route("/export/pnl")
+@login_req
+@admin_req
+def exp_pnl():
+    conn = get_db()
+    date_from = request.args.get("from","")
+    date_to   = request.args.get("to","")
+
+    if date_from and date_to:
+        w2 = "WHERE date>=%s AND date<=%s"; p2=(date_from,date_to)
+        wp = "WHERE date>=%s AND date<=%s AND status!='Unpaid'"; period=f"{date_from} to {date_to}"
+    elif date_from:
+        w2 = "WHERE date>=%s"; p2=(date_from,); wp="WHERE date>=%s AND status!='Unpaid'"; period=f"From {date_from}"
+    elif date_to:
+        w2 = "WHERE date<=%s"; p2=(date_to,); wp="WHERE date<=%s AND status!='Unpaid'"; period=f"Until {date_to}"
+    else:
+        w2=""; p2=(); wp="WHERE status!='Unpaid'"; period="All Time"
+
+    tr  = float(qry(conn,f"SELECT COALESCE(SUM(total_cod),0) as v FROM courier {w2}",p2).fetchone()["v"] or 0)
+    tc  = float(qry(conn,f"SELECT COALESCE(SUM(charges),0) as v FROM courier {w2}",p2).fetchone()["v"] or 0)
+    tp  = float(qry(conn,f"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases {wp}",p2).fetchone()["v"] or 0)
+    te  = float(qry(conn,f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w2}",p2).fetchone()["v"] or 0)
+    tad = float(qry(conn,f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w2}",p2).fetchone()["v"] or 0)
+    tad_tax = float(qry(conn,f"SELECT COALESCE(SUM(tax_amount),0) as v FROM ad_spend {w2}",p2).fetchone()["v"] or 0)
+    ti  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0)
+    ll  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0)
+    lw  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0)
+    cats    = qry(conn,f"SELECT category, SUM(amount) t FROM expenses {w2} GROUP BY category ORDER BY t DESC",p2).fetchall()
+    ad_plats= qry(conn,f"SELECT platform, SUM(total_pkr) t, SUM(tax_amount) tax FROM ad_spend {w2} GROUP BY platform ORDER BY t DESC",p2).fetchall()
+    conn.close()
+
+    nc=tr-tc; gp=tr-tp; np=gp-tc-te-tad
+
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow([f"BizHisaab — Profit & Loss Report"])
+    w.writerow([f"Period: {period}"])
+    w.writerow([])
+    w.writerow(["INCOME","",""])
+    w.writerow(["Total COD Received","",tr])
+    w.writerow(["Courier Charges","",f"-{tc}"])
+    w.writerow(["Net Income","",tr-tc])
+    w.writerow([])
+    w.writerow(["COST OF GOODS","",""])
+    w.writerow(["Total Purchases (Paid)","",f"-{tp}"])
+    w.writerow(["Gross Profit","",gp])
+    w.writerow([])
+    w.writerow(["OPERATING EXPENSES","",""])
+    for r in cats:
+        w.writerow([r['category'],"",f"-{float(r['t'] or 0):.0f}"])
+    w.writerow(["Total Expenses","",f"-{te}"])
+    w.writerow([])
+    w.writerow(["AD SPEND (Marketing)","",""])
+    for r in ad_plats:
+        w.writerow([r['platform'],"",f"-{float(r['t'] or 0):.0f}"])
+    w.writerow(["Tax on Ads","",f"-{tad_tax}"])
+    w.writerow(["Total Ad Spend","",f"-{tad}"])
+    w.writerow([])
+    w.writerow(["NET PROFIT / LOSS","",np])
+    w.writerow([])
+    w.writerow(["CAPITAL & LIABILITIES","",""])
+    w.writerow(["Total Investment","",ti])
+    w.writerow(["Loans Taken","",ll])
+    w.writerow(["Loans Repaid","",lw])
+    w.writerow(["Outstanding Loan","",ll-lw])
+
+    out.seek(0)
+    fname = f"pnl_{period.replace(' ','_')}.csv"
+    resp = Response("\ufeff"+out.getvalue(), mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f"attachment; filename={fname}"
+    return resp
+
 @app.route("/export/all")
 @login_req
 @admin_req
@@ -1695,18 +1767,29 @@ def exp_all():
     conn = get_db()
     out = io.StringIO(); w = csv.writer(out)
     for name, headers, sql in [
-        ("PURCHASES",["Date","Vendor","Product","Qty","Unit","Per Unit","Total","Status"],"SELECT date,vendor,product,quantity,unit,per_unit_price,total_amount,status FROM purchases ORDER BY date DESC"),
-        ("EXPENSES",["Date","Category","Description","Paid To","Amount"],"SELECT date,category,description,paid_to,amount FROM expenses ORDER BY date DESC"),
-        ("COURIER",["Date","Courier","Type","Parcels","Total COD","Charges","Net"],"SELECT date,courier_name,type,parcels,total_cod,charges,net_amount FROM courier ORDER BY date DESC"),
-        ("INVESTMENT",["Date","Description","Amount"],"SELECT date,description,amount FROM investment ORDER BY date DESC"),
-        ("LOANS",["Date","Person","Type","Amount"],"SELECT date,person,type,amount FROM loans ORDER BY date DESC"),
+        ("PURCHASES",["Date","Vendor","Product","Qty","Unit","Per Unit","Total","Status","Notes","Added By"],
+         "SELECT date,vendor,product,quantity,unit,per_unit_price,total_amount,status,notes,added_by FROM purchases ORDER BY date DESC"),
+        ("EXPENSES",["Date","Category","Description","Paid To","Amount","Method","Added By"],
+         "SELECT date,category,description,paid_to,amount,payment_method,added_by FROM expenses ORDER BY date DESC"),
+        ("COURIER",["Date","Account","Courier","Type","Parcels","Total COD","Charges","Net","Reference","Added By"],
+         "SELECT date,account_name,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by FROM courier ORDER BY date DESC"),
+        ("AD SPEND",["Date","Platform","Account","Site","Dollar","Rate","Base PKR","Tax","Total PKR","Period From","Period To","Description"],
+         "SELECT date,platform,ad_account_name,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,period_from,period_to,description FROM ad_spend ORDER BY date DESC"),
+        ("INVESTMENT",["Date","Description","Amount","Added By"],
+         "SELECT date,description,amount,added_by FROM investment ORDER BY date DESC"),
+        ("LOANS",["Date","Person","Type","Amount","Added By"],
+         "SELECT date,person,type,amount,added_by FROM loans ORDER BY date DESC"),
+        ("CASH & BANK",["Date","Account","Type","Description","Amount","Added By"],
+         "SELECT date,account,type,description,amount,added_by FROM cashbank ORDER BY date ASC"),
     ]:
         w.writerow([]); w.writerow([f"=== {name} ==="]); w.writerow(headers)
         for r in qry(conn,sql).fetchall(): w.writerow(list(r.values()))
     conn.close()
     out.seek(0)
+    from datetime import datetime
+    fname = f"bizhisaab_full_export_{datetime.now().strftime('%Y%m%d')}.csv"
     resp = Response("\ufeff"+out.getvalue(), mimetype="text/csv; charset=utf-8")
-    resp.headers["Content-Disposition"] = "attachment; filename=bizhisaab_all_data.csv"
+    resp.headers["Content-Disposition"] = f"attachment; filename={fname}"
     return resp
 
 # ── START ─────────────────────────────────────────────────────────────────────
