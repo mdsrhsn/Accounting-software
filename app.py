@@ -5,10 +5,11 @@ from datetime import date, datetime
 from functools import wraps
 
 app = Flask(__name__)
+app.secret_key = "bizhisaab2025secret"
 from flask_cors import CORS
 import requests as ext_req
 CORS(app)
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 CSS = """
 <style>
