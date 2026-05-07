@@ -1957,6 +1957,10 @@ def proxy_postex_payment(tracking_no):
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN", "")
 SHOPIFY_STORE = "womencomforts.myshopify.com"
 SHOPIFY_BASE  = f"https://{SHOPIFY_STORE}/admin/api/2024-01"
+SHOPIFY_HEADERS = {
+    "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+    "Content-Type": "application/json"
+}
 # ── Database: Returns table banana ───────────────────────────────
 def init_returns_db():
     conn = get_db()
