@@ -63,7 +63,7 @@ tr:hover td{background:#F8FAFC}
 .pnl-r{display:flex;justify-content:space-between;padding:5px 8px;border-bottom:1px solid #F1F5F9;font-size:12px}
 .pnl-t{font-weight:700;background:#F8FAFC}
 .pnl-grand{display:flex;justify-content:space-between;font-size:14px;font-weight:700;background:#EFF6FF;border-radius:6px;padding:10px 12px;margin-top:8px}
-@media(max-width:700px){.sb{display:none}.main{margin-left:0}.g2{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.sb{display:block;position:fixed;z-index:999;height:100%;transform:translateX(-100%);transition:.3s}.sb.open{transform:translateX(0)}.main{margin-left:0}.g2{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}.mob-menu{display:block!important}}
 </style>
 """
 
