@@ -7,8 +7,7 @@ from functools import wraps
 app = Flask(__name__)
 from flask_cors import CORS
 import requests as ext_req
-CORS(app)
-app.secret_key = "bizhisaab2025secret"
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)app.secret_key = "bizhisaab2025secret"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 CSS = """
