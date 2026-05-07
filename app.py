@@ -5,6 +5,9 @@ from datetime import date, datetime
 from functools import wraps
 
 app = Flask(__name__)
+from flask_cors import CORS
+import requests as ext_req
+CORS(app)
 app.secret_key = "bizhisaab2025secret"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
@@ -1797,3 +1800,152 @@ init_db()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)
+    # ═══════════════════════════════════════════════════════════════════
+# COURIER PROXY ROUTES — BizHisaab mein add karo app.py ke BILKUL END mein
+# (before if __name__ == '__main__': line)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Step 1: requirements.txt mein ye line add karo:
+#   flask-cors
+#
+# Step 2: app.py ke TOP mein (imports ke saath) ye add karo:
+#   from flask_cors import CORS
+#   import requests as ext_req
+#   CORS(app)
+#
+# Step 3: Ye saara code app.py ke END mein paste karo
+# ═══════════════════════════════════════════════════════════════════
+
+POSTEX_TOKEN = "ZmU0N2Q4OTU2NTNlNDg2NGFlMDgwM2E2ZTc3ZTEwMjM6ZDgzMDZiMWI2YjU0NDI2M2E1ODY4MTM1MTU1MGUwNDA="
+DIGI_PHONE   = "923123456789"
+DIGI_PASS    = "12345678"
+DIGI_BASE    = "https://dev.digidokaan.pk/api/v1/digidokaan"
+PX_BASE      = "https://api.postex.pk/services/integration/api/order"
+
+# ── DigiDokaan: Login ─────────────────────────────────────────────
+@app.route("/proxy/digi/login", methods=["POST","OPTIONS"])
+def proxy_digi_login():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        r = ext_req.post(
+            f"{DIGI_BASE}/auth/login",
+            json={"phone": DIGI_PHONE, "password": DIGI_PASS},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── DigiDokaan: Tracking ──────────────────────────────────────────
+@app.route("/proxy/digi/track", methods=["POST","OPTIONS"])
+def proxy_digi_track():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        body = request.get_json()
+        token = body.get("token","")
+        tracking_no = body.get("tracking_no","")
+        r = ext_req.post(
+            f"{DIGI_BASE}/get-order-tracking",
+            json={"tracking_no": tracking_no},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── DigiDokaan: Shipper Advice ────────────────────────────────────
+@app.route("/proxy/digi/advice", methods=["POST","OPTIONS"])
+def proxy_digi_advice():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        body = request.get_json()
+        token = body.get("token","")
+        r = ext_req.post(
+            f"{DIGI_BASE}/shipper_advice_action",
+            json={
+                "phone": DIGI_PHONE,
+                "gateway_id": body.get("gateway_id", 3),
+                "tracking_no": body.get("tracking_no",""),
+                "shipper_advice_status": body.get("action","reattempt"),
+                "shipper_advice_remarks": body.get("remarks",""),
+                "source": "core_api"
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── PostEx: List Orders ───────────────────────────────────────────
+@app.route("/proxy/postex/orders", methods=["POST","OPTIONS"])
+def proxy_postex_orders():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        body = request.get_json()
+        r = ext_req.get(
+            f"{PX_BASE}/v1/get-all-order",
+            json={
+                "orderStatusID": body.get("orderStatusID", 0),
+                "fromDate": body.get("fromDate",""),
+                "toDate": body.get("toDate","")
+            },
+            headers={"token": POSTEX_TOKEN, "Content-Type": "application/json"},
+            timeout=20
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── PostEx: Single Track ──────────────────────────────────────────
+@app.route("/proxy/postex/track/<tracking_no>", methods=["GET","OPTIONS"])
+def proxy_postex_track(tracking_no):
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        r = ext_req.get(
+            f"{PX_BASE}/v1/track-order/{tracking_no}",
+            headers={"token": POSTEX_TOKEN},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── PostEx: Bulk Track ────────────────────────────────────────────
+@app.route("/proxy/postex/bulk-track", methods=["POST","OPTIONS"])
+def proxy_postex_bulk_track():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        body = request.get_json()
+        r = ext_req.get(
+            f"{PX_BASE}/v1/track-bulk-order",
+            json={"trackingNumber": body.get("trackingNumbers",[])},
+            headers={"token": POSTEX_TOKEN, "Content-Type": "application/json"},
+            timeout=20
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── PostEx: Payment Status ────────────────────────────────────────
+@app.route("/proxy/postex/payment/<tracking_no>", methods=["GET","OPTIONS"])
+def proxy_postex_payment(tracking_no):
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        r = ext_req.get(
+            f"{PX_BASE}/v1/payment-status/{tracking_no}",
+            headers={"token": POSTEX_TOKEN},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
