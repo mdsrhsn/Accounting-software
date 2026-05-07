@@ -1954,7 +1954,7 @@ def proxy_postex_payment(tracking_no):
 # SHOPIFY + RETURNS MODULE — app.py ke BILKUL END mein paste karo
 # ═══════════════════════════════════════════════════════════════════
 
-SHOPIFY_TOKEN = "atkn_790215619cd58ffc004fc2cec1f251501b77801b6db1d51f6d51ac3f2338bc88"
+SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN", "")
 SHOPIFY_STORE = "womencomforts.myshopify.com"
 SHOPIFY_BASE  = f"https://{SHOPIFY_STORE}/admin/api/2026-04"
 
