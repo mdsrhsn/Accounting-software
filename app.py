@@ -195,6 +195,7 @@ def layout(title, page, body):
       <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
+    <a href="/returns" class="{'on' if page=='ret' else ''}">↩ Returns</a>
       {admin_links}
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
@@ -1948,4 +1949,330 @@ def proxy_postex_payment(tracking_no):
         return Response(r.content, r.status_code, {"Content-Type": "application/json"})
     except Exception as e:
         return {"error": str(e)}, 500
+
+# ═══════════════════════════════════════════════════════════════════
+# SHOPIFY + RETURNS MODULE — app.py ke BILKUL END mein paste karo
+# ═══════════════════════════════════════════════════════════════════
+
+SHOPIFY_TOKEN = "atkn_790215619cd58ffc004fc2cec1f251501b77801b6db1d51f6d51ac3f2338bc88"
+SHOPIFY_STORE = "womencomforts.myshopify.com"
+SHOPIFY_BASE  = f"https://{SHOPIFY_STORE}/admin/api/2026-04"
+
+# ── Database: Returns table banana ───────────────────────────────
+def init_returns_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS returns (
+        id SERIAL PRIMARY KEY,
+        shopify_order_id TEXT,
+        shopify_order_name TEXT,
+        tracking_number TEXT,
+        courier_name TEXT,
+        product_name TEXT,
+        quantity INTEGER DEFAULT 1,
+        reason TEXT,
+        status TEXT DEFAULT 'returned',
+        return_date TEXT,
+        added_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    )""")
+    conn.commit()
+    conn.close()
+
+init_returns_db()
+
+# ── Shopify Proxy: Orders list ────────────────────────────────────
+@app.route("/proxy/shopify/orders", methods=["GET","OPTIONS"])
+@login_req
+def proxy_shopify_orders():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        status = request.args.get("status", "any")
+        limit  = request.args.get("limit", "50")
+        r = ext_req.get(
+            f"{SHOPIFY_BASE}/orders.json?status={status}&limit={limit}",
+            headers={"X-Shopify-Access-Token": SHOPIFY_TOKEN},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── Shopify Proxy: Single order ───────────────────────────────────
+@app.route("/proxy/shopify/order/<order_id>", methods=["GET","OPTIONS"])
+@login_req
+def proxy_shopify_order(order_id):
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        r = ext_req.get(
+            f"{SHOPIFY_BASE}/orders/{order_id}.json",
+            headers={"X-Shopify-Access-Token": SHOPIFY_TOKEN},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── Shopify Proxy: Order by name (#WC4675) ────────────────────────
+@app.route("/proxy/shopify/search", methods=["GET","OPTIONS"])
+@login_req
+def proxy_shopify_search():
+    if request.method == "OPTIONS":
+        return Response("", 200)
+    try:
+        name = request.args.get("name", "")
+        r = ext_req.get(
+            f"{SHOPIFY_BASE}/orders.json?name={name}&status=any",
+            headers={"X-Shopify-Access-Token": SHOPIFY_TOKEN},
+            timeout=15
+        )
+        return Response(r.content, r.status_code, {"Content-Type": "application/json"})
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ── Returns: Add return record ────────────────────────────────────
+@app.route("/returns", methods=["GET","POST"])
+@login_req
+def returns():
+    conn = get_db()
+    if request.method == "POST":
+        f = request.form
+        qry(conn, """INSERT INTO returns
+            (shopify_order_id, shopify_order_name, tracking_number, courier_name,
+             product_name, quantity, reason, status, return_date, added_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (f.get("shopify_order_id",""), f.get("shopify_order_name",""),
+             f.get("tracking_number",""), f.get("courier_name",""),
+             f.get("product_name",""), int(f.get("quantity",1)),
+             f.get("reason",""), f.get("status","returned"),
+             f.get("return_date") or today(), session.get("naam","")))
+        conn.commit()
+        conn.close()
+        session.setdefault('_flashes',[]).append(("success","Return record save ho gaya!"))
+        return redirect("/returns")
+
+    # Stats
+    rows     = qry(conn,"SELECT * FROM returns ORDER BY created_at DESC").fetchall()
+    total    = qry(conn,"SELECT COUNT(*) as v FROM returns").fetchone()["v"] or 0
+    returned = qry(conn,"SELECT COUNT(*) as v FROM returns WHERE status='returned'").fetchone()["v"] or 0
+    lost     = qry(conn,"SELECT COUNT(*) as v FROM returns WHERE status='lost'").fetchone()["v"] or 0
+    conn.close()
+
+    trs = "".join([f"""<tr>
+        <td>{r['return_date']}</td>
+        <td><b style="color:#3B82F6">{r['shopify_order_name'] or '—'}</b></td>
+        <td style="font-size:11px;font-family:monospace">{r['tracking_number'] or '—'}</td>
+        <td><span class='badge bg-w'>{r['courier_name'] or '—'}</span></td>
+        <td>{r['product_name'] or '—'}</td>
+        <td>{r['quantity']}</td>
+        <td>{r['reason'] or '—'}</td>
+        <td><span class='badge {"bg-g" if r["status"]=="returned" else "bg-r"}'>{r['status']}</span></td>
+        <td style="color:#9CA3AF;font-size:10px">{r['added_by']}</td>
+        {'<td><a href="/returns/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
+    </tr>""" for r in rows]) or "<tr><td colspan='10' style='text-align:center;color:#9CA3AF;padding:16px'>Koi return record nahi</td></tr>"
+
+    body = f"""{flashes()}
+
+    <div class="grid" style="margin-bottom:14px">
+        <div class="met"><div class="ml">Total Returns</div><div class="mv b">{total}</div></div>
+        <div class="met"><div class="ml">Returned</div><div class="mv g">{returned}</div></div>
+        <div class="met"><div class="ml">Lost/Written Off</div><div class="mv r">{lost}</div></div>
+    </div>
+
+    <!-- BARCODE SCANNER SECTION -->
+    <div class="card" style="border-left:4px solid #3B82F6">
+        <div class="ct">📷 Barcode Scanner — Tracking Number Scan karo</div>
+        <div style="font-size:12px;color:#6B7280;margin-bottom:12px">Camera se courier slip ka barcode scan karo — tracking number auto fill ho jayega</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <button class="btn bp" onclick="startScanner()" id="scan-btn">📷 Camera Scan karo</button>
+            <button class="btn" onclick="stopScanner()" id="stop-btn" style="display:none">⏹ Scan Band karo</button>
+        </div>
+        <div id="scanner-container" style="display:none;margin-bottom:10px">
+            <video id="scanner-video" style="width:100%;max-width:400px;border-radius:8px;border:2px solid #3B82F6"></video>
+            <div id="scan-status" style="font-size:12px;color:#3B82F6;margin-top:6px">Camera ready — barcode frame mein rakhein</div>
+        </div>
+        <div id="scan-result" style="font-size:13px;color:#16A34A;font-weight:600;margin-bottom:8px"></div>
+    </div>
+
+    <!-- ADD RETURN FORM -->
+    <div class="card">
+        <div class="ct">Return Record Add karo</div>
+        <form method="POST" action="/returns" id="return-form">
+        <div class="fgrid">
+            <div class="fg">
+                <label>Shopify Order # (e.g. WC4675)</label>
+                <div style="display:flex;gap:8px">
+                    <input name="shopify_order_name" id="order-name-input" placeholder="#WC4675" style="flex:1;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <button type="button" class="btn bp" onclick="searchOrder()" style="white-space:nowrap">🔍 Search</button>
+                </div>
+                <input type="hidden" name="shopify_order_id" id="order-id-hidden">
+            </div>
+            <div class="fg">
+                <label>Tracking Number</label>
+                <input name="tracking_number" id="tracking-input" placeholder="Courier tracking number" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg">
+                <label>Product Name</label>
+                <input name="product_name" id="product-input" placeholder="Auto fill hoga ya manually likho" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg">
+                <label>Courier</label>
+                <select name="courier_name" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option>DigiDokaan</option>
+                    <option>PostEx</option>
+                    <option>MNP</option>
+                    <option>Leopards</option>
+                    <option>TCS</option>
+                    <option>Other</option>
+                </select>
+            </div>
+            <div class="fg">
+                <label>Quantity</label>
+                <input name="quantity" type="number" value="1" min="1" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg">
+                <label>Return Status</label>
+                <select name="status" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option value="returned">Returned ✅</option>
+                    <option value="lost">Lost / Written Off ❌</option>
+                </select>
+            </div>
+            <div class="fg">
+                <label>Return Date</label>
+                <input name="return_date" type="date" id="ret-dt" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg">
+                <label>Reason</label>
+                <input name="reason" placeholder="e.g. Customer refused, Wrong address" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+        </div>
+
+        <!-- Order detail preview -->
+        <div id="order-preview" style="display:none;background:#EFF6FF;border-radius:8px;padding:12px;margin-bottom:10px;font-size:12px">
+            <div style="font-weight:600;color:#1E40AF;margin-bottom:6px">📦 Order Details</div>
+            <div id="order-preview-content"></div>
+        </div>
+
+        <button class="btn bp" type="submit">✓ Return Record Save karo</button>
+        </form>
+    </div>
+
+    <!-- RETURNS TABLE -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div class="ct" style="margin:0">All Returns</div>
+            <a href="/export/returns" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
+        </div>
+        <div class="tw"><table>
+            <thead><tr>
+                <th>Date</th><th>Order #</th><th>Tracking</th><th>Courier</th>
+                <th>Product</th><th>Qty</th><th>Reason</th><th>Status</th>
+                <th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}
+            </tr></thead>
+            <tbody>{trs}</tbody>
+        </table></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <script>
+    document.getElementById('ret-dt').valueAsDate = new Date();
+
+    // ── Barcode Scanner ──────────────────────────────────────────
+    function startScanner() {{
+        document.getElementById('scanner-container').style.display = 'block';
+        document.getElementById('scan-btn').style.display = 'none';
+        document.getElementById('stop-btn').style.display = 'inline-block';
+
+        Quagga.init({{
+            inputStream: {{
+                name: "Live",
+                type: "LiveStream",
+                target: document.getElementById('scanner-video'),
+                constraints: {{ facingMode: "environment" }}
+            }},
+            decoder: {{
+                readers: ["code_128_reader","ean_reader","code_39_reader","upc_reader"]
+            }}
+        }}, function(err) {{
+            if (err) {{
+                document.getElementById('scan-status').textContent = 'Camera error: ' + err;
+                return;
+            }}
+            Quagga.start();
+        }});
+
+        Quagga.onDetected(function(result) {{
+            var code = result.codeResult.code;
+            document.getElementById('tracking-input').value = code;
+            document.getElementById('scan-result').textContent = '✅ Scanned: ' + code;
+            document.getElementById('scan-status').textContent = 'Barcode detected!';
+            stopScanner();
+        }});
+    }}
+
+    function stopScanner() {{
+        Quagga.stop();
+        document.getElementById('scanner-container').style.display = 'none';
+        document.getElementById('scan-btn').style.display = 'inline-block';
+        document.getElementById('stop-btn').style.display = 'none';
+    }}
+
+    // ── Shopify Order Search ─────────────────────────────────────
+    async function searchOrder() {{
+        var name = document.getElementById('order-name-input').value.trim();
+        if (!name) {{ alert('Order number likho pehle'); return; }}
+        if (!name.startsWith('#')) name = '#' + name;
+
+        try {{
+            var r = await fetch('/proxy/shopify/search?name=' + encodeURIComponent(name));
+            var d = await r.json();
+            var orders = d.orders || [];
+            if (orders.length > 0) {{
+                var o = orders[0];
+                document.getElementById('order-id-hidden').value = o.id;
+                document.getElementById('order-name-input').value = o.name;
+
+                // Product names
+                var products = (o.line_items || []).map(i => i.title + ' x' + i.quantity).join(', ');
+                document.getElementById('product-input').value = products;
+
+                // Preview
+                var customer = (o.shipping_address || {{}});
+                var preview = '<b>' + o.name + '</b> — ' + (o.customer ? o.customer.first_name + ' ' + o.customer.last_name : 'Guest') +
+                    '<br>📍 ' + (customer.city || '') + ', ' + (customer.address1 || '') +
+                    '<br>📦 ' + products +
+                    '<br>💰 PKR ' + parseInt(o.total_price || 0).toLocaleString() +
+                    '<br>📊 Status: ' + o.fulfillment_status;
+                document.getElementById('order-preview-content').innerHTML = preview;
+                document.getElementById('order-preview').style.display = 'block';
+            }} else {{
+                alert('Order nahi mila: ' + name);
+            }}
+        }} catch(e) {{
+            alert('Error: ' + e.message);
+        }}
+    }}
+    </script>"""
+
+    return layout("Returns Management","ret",body)
+
+@app.route("/returns/del/<int:i>")
+@login_req
+@admin_req
+def del_return(i):
+    conn = get_db()
+    qry(conn,"DELETE FROM returns WHERE id=%s",(i,))
+    conn.commit(); conn.close()
+    session.setdefault('_flashes',[]).append(("info","Deleted"))
+    return redirect("/returns")
+
+@app.route("/export/returns")
+@login_req
+def exp_returns():
+    conn = get_db()
+    rows = qry(conn,"SELECT return_date,shopify_order_name,tracking_number,courier_name,product_name,quantity,reason,status,added_by FROM returns ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return make_csv(["Date","Order #","Tracking","Courier","Product","Qty","Reason","Status","Added By"],rows,"returns.csv")
 
