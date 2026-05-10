@@ -196,6 +196,7 @@ def layout(title, page, body):
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
     <a href="/returns" class="{'on' if page=='ret' else ''}">↩ Returns</a>
+    <a href="/cashflow" class="{'on' if page=='cf' else ''}">💵 Cash Flow</a>
       {admin_links}
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
@@ -2278,4 +2279,208 @@ def exp_returns():
     rows = qry(conn,"SELECT return_date,shopify_order_name,tracking_number,courier_name,product_name,quantity,reason,status,added_by FROM returns ORDER BY created_at DESC").fetchall()
     conn.close()
     return make_csv(["Date","Order #","Tracking","Courier","Product","Qty","Reason","Status","Added By"],rows,"returns.csv")
+
+# ═══════════════════════════════════════════════════════════════════
+# CASH FLOW STATEMENT — app.py ke BILKUL END mein paste karo
+# (if __name__ == '__main__': se pehle)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/cashflow")
+@login_req
+@admin_req
+def cashflow():
+    conn = get_db()
+
+    # Date filter
+    date_from = request.args.get("from", "")
+    date_to   = request.args.get("to", "")
+
+    if date_from and date_to:
+        w  = "WHERE date>=%s AND date<=%s"
+        p2 = (date_from, date_to)
+        period = f"{date_from} to {date_to}"
+    elif date_from:
+        w  = "WHERE date>=%s"
+        p2 = (date_from,)
+        period = f"From {date_from}"
+    elif date_to:
+        w  = "WHERE date<=%s"
+        p2 = (date_to,)
+        period = f"Until {date_to}"
+    else:
+        w  = ""
+        p2 = ()
+        period = "All Time"
+
+    # ── CASH IN ───────────────────────────────────────────────────
+    cod_in     = float(qry(conn, f"SELECT COALESCE(SUM(net_amount),0) as v FROM courier {w}", p2).fetchone()["v"] or 0)
+    loan_in    = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    invest_in  = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM investment {w}", p2).fetchone()["v"] or 0)
+    cb_in      = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type IN ('Money In','Opening Balance') {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    total_in   = cod_in + loan_in + invest_in
+
+    # ── CASH OUT ──────────────────────────────────────────────────
+    purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    expenses   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w}", p2).fetchone()["v"] or 0)
+    adspend    = float(qry(conn, f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w}", p2).fetchone()["v"] or 0)
+    loan_out   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    cb_out     = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Money Out' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    total_out  = purchases + expenses + adspend + loan_out
+
+    # ── NET ───────────────────────────────────────────────────────
+    net_cash   = total_in - total_out
+
+    # ── ACTUAL CASH (Cash & Bank) ─────────────────────────────────
+    actual_cash_in  = float(qry(conn, "SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type IN ('Money In','Opening Balance')").fetchone()["v"] or 0)
+    actual_cash_out = float(qry(conn, "SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Money Out'").fetchone()["v"] or 0)
+    actual_cash     = actual_cash_in - actual_cash_out
+
+    # ── OUTSTANDING LOAN ──────────────────────────────────────────
+    total_loan_taken  = float(qry(conn, "SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0)
+    total_loan_repaid = float(qry(conn, "SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0)
+    outstanding_loan  = total_loan_taken - total_loan_repaid
+
+    # ── LOAN DETAILS ──────────────────────────────────────────────
+    loan_taken_rows  = qry(conn, "SELECT * FROM loans WHERE type='Loan Taken' ORDER BY date DESC LIMIT 10").fetchall()
+    loan_repaid_rows = qry(conn, "SELECT * FROM loans WHERE type='Loan Repaid' ORDER BY date DESC LIMIT 10").fetchall()
+
+    conn.close()
+
+    untracked = net_cash - actual_cash if actual_cash > 0 else 0
+
+    # ── STATUS COLOR ──────────────────────────────────────────────
+    net_col = "g" if net_cash >= 0 else "r"
+
+    # ── LOAN ROWS ─────────────────────────────────────────────────
+    lt_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td class='g'><b>{pk(r['amount'])}</b></td></tr>" for r in loan_taken_rows]) or "<tr><td colspan='3' style='text-align:center;color:#9CA3AF'>No records</td></tr>"
+    lr_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td class='r'><b>{pk(r['amount'])}</b></td></tr>" for r in loan_repaid_rows]) or "<tr><td colspan='3' style='text-align:center;color:#9CA3AF'>No records</td></tr>"
+
+    body = f"""{flashes()}
+
+    <!-- DATE FILTER -->
+    <div class="card" style="margin-bottom:14px">
+      <form method="GET" action="/cashflow" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="fg" style="margin:0;flex:1;min-width:130px">
+          <label style="font-size:11px;color:#6B7280;font-weight:600;display:block;margin-bottom:3px">From Date</label>
+          <input name="from" type="date" value="{date_from}" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+        </div>
+        <div class="fg" style="margin:0;flex:1;min-width:130px">
+          <label style="font-size:11px;color:#6B7280;font-weight:600;display:block;margin-bottom:3px">To Date</label>
+          <input name="to" type="date" value="{date_to}" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+        </div>
+        <button class="btn bp" type="submit" style="padding:7px 16px">Filter</button>
+        <a href="/cashflow" class="btn" style="padding:7px 16px;background:#F1F5F9;color:#6B7280">Reset</a>
+      </form>
+    </div>
+
+    <!-- SUMMARY CARDS -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="met"><div class="ml">Total Cash Aaya</div><div class="mv g">{pk(total_in)}</div></div>
+      <div class="met"><div class="ml">Total Cash Gaya</div><div class="mv r">{pk(total_out)}</div></div>
+      <div class="met"><div class="ml">Net Cash</div><div class="mv {net_col}">{pk(net_cash)}</div></div>
+      <div class="met"><div class="ml">Loan Baaki Dena</div><div class="mv w">{pk(outstanding_loan)}</div></div>
+    </div>
+
+    <div class="g2">
+
+      <!-- CASH IN -->
+      <div class="card">
+        <div class="ct" style="color:#16A34A">Cash Aaya (+)</div>
+        <div style="font-size:11px;color:#6B7280;margin-bottom:10px">Period: {period}</div>
+
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">COD Received (Net)</span>
+          <span class="g"><b>{pk(cod_in)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Loan Liya</span>
+          <span class="g"><b>{pk(loan_in)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Investment</span>
+          <span class="g"><b>{pk(invest_in)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0;font-size:14px;font-weight:700">
+          <span>Total Aaya</span>
+          <span class="g">{pk(total_in)}</span>
+        </div>
+      </div>
+
+      <!-- CASH OUT -->
+      <div class="card">
+        <div class="ct" style="color:#DC2626">Cash Gaya (-)</div>
+        <div style="font-size:11px;color:#6B7280;margin-bottom:10px">Period: {period}</div>
+
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Purchases (Paid)</span>
+          <span class="r"><b>{pk(purchases)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Expenses</span>
+          <span class="r"><b>{pk(expenses)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Ad Spend</span>
+          <span class="r"><b>{pk(adspend)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Loan Wapas Diya</span>
+          <span class="r"><b>{pk(loan_out)}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0;font-size:14px;font-weight:700">
+          <span>Total Gaya</span>
+          <span class="r">{pk(total_out)}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- NET CASH BOX -->
+    <div class="card" style="border-left:4px solid {'#16A34A' if net_cash >= 0 else '#DC2626'};margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <div class="ct" style="margin:0">Net Cash Position</div>
+          <div style="font-size:12px;color:#6B7280;margin-top:2px">Total Aaya - Total Gaya</div>
+        </div>
+        <div style="font-size:26px;font-weight:700;color:{'#16A34A' if net_cash >= 0 else '#DC2626'}">{pk(net_cash)}</div>
+      </div>
+
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid #F1F5F9">
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid #F1F5F9">
+          <span style="color:#6B7280">Cash & Bank mein actual</span>
+          <span style="font-weight:600">{pk(actual_cash) if actual_cash > 0 else "Record nahi hai — Cash & Bank use karo"}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid #F1F5F9">
+          <span style="color:#6B7280">Loan abhi baaki dena hai</span>
+          <span style="font-weight:600;color:#D97706">{pk(outstanding_loan)}</span>
+        </div>
+        {f'''<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0">
+          <span style="color:#6B7280">Untracked (stock / unsettled COD)</span>
+          <span style="font-weight:600;color:#D97706">{pk(untracked)}</span>
+        </div>''' if actual_cash > 0 and untracked > 0 else ''}
+      </div>
+    </div>
+
+    <!-- LOAN DETAIL -->
+    <div class="g2">
+      <div class="card">
+        <div class="ct">Loan Liya — Detail</div>
+        <div class="tw"><table>
+          <thead><tr><th>Date</th><th>Person</th><th>Amount</th></tr></thead>
+          <tbody>{lt_rows}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <div class="ct">Loan Wapas Diya — Detail</div>
+        <div class="tw"><table>
+          <thead><tr><th>Date</th><th>Person</th><th>Amount</th></tr></thead>
+          <tbody>{lr_rows}</tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div style="background:#EFF6FF;border-radius:8px;padding:10px 14px;font-size:11px;color:#1E40AF;margin-top:8px">
+      Cash Flow = COD + Loan Liya + Investment - Purchases - Expenses - Ads - Loan Wapas Diya
+    </div>"""
+
+    return layout("Cash Flow", "cf", body)
 
