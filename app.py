@@ -2485,3 +2485,243 @@ def cashflow():
 
     return layout("Cash Flow", "cf", body)
 
+# ═══════════════════════════════════════════════════════════════════
+# PARTIAL PAYMENT TRACKER — app.py ke BILKUL END mein paste karo
+# ═══════════════════════════════════════════════════════════════════
+
+def init_partial_payments_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS purchase_payments (
+        id SERIAL PRIMARY KEY,
+        purchase_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        payment_method TEXT DEFAULT 'Cash',
+        payment_date TEXT,
+        notes TEXT,
+        added_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    )""")
+    try:
+        cur.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS total_paid REAL DEFAULT 0")
+        cur.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS remaining REAL DEFAULT 0")
+    except: conn.rollback()
+    conn.commit()
+    conn.close()
+
+init_partial_payments_db()
+
+# ── Partial Payments Page ─────────────────────────────────────────
+@app.route("/partial-payments", methods=["GET","POST"])
+@login_req
+def partial_payments():
+    conn = get_db()
+
+    if request.method == "POST":
+        f = request.form
+        purchase_id = int(f.get("purchase_id", 0))
+        amount = float(f.get("amount", 0))
+        if purchase_id and amount > 0:
+            # Payment record karo
+            qry(conn, """INSERT INTO purchase_payments
+                (purchase_id, amount, payment_method, payment_date, notes, added_by)
+                VALUES (%s,%s,%s,%s,%s,%s)""",
+                (purchase_id, amount, f.get("payment_method","Cash"),
+                 f.get("payment_date") or today(),
+                 f.get("notes",""), session.get("naam","")))
+
+            # Purchase ki total_paid aur remaining update karo
+            purchase = qry(conn, "SELECT * FROM purchases WHERE id=%s", (purchase_id,)).fetchone()
+            if purchase:
+                total_payments = qry(conn,
+                    "SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE purchase_id=%s",
+                    (purchase_id,)).fetchone()["v"] or 0
+                total_amount = float(purchase["total_amount"] or 0)
+                remaining = total_amount - float(total_payments)
+                new_status = "Paid" if remaining <= 0 else "Partial"
+                qry(conn, """UPDATE purchases SET
+                    total_paid=%s, remaining=%s, status=%s WHERE id=%s""",
+                    (float(total_payments), max(0, remaining), new_status, purchase_id))
+
+            conn.commit()
+            session.setdefault('_flashes',[]).append(("success", f"Payment Rs {int(amount):,} record ho gaya!"))
+        conn.close()
+        return redirect("/partial-payments")
+
+    # Stats
+    total_purchases = float(qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases").fetchone()["v"] or 0)
+    total_paid_all  = float(qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments").fetchone()["v"] or 0)
+    partial_rows    = qry(conn,"SELECT * FROM purchases WHERE status='Partial' ORDER BY created_at DESC").fetchall()
+    unpaid_rows     = qry(conn,"SELECT * FROM purchases WHERE status='Unpaid' ORDER BY created_at DESC").fetchall()
+    total_baaki     = float(qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status IN ('Partial','Unpaid')").fetchone()["v"] or 0) - float(qry(conn,"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE status='Partial'").fetchone()["v"] or 0)
+
+    conn.close()
+
+    def purchase_row(r, show_pay_btn=True):
+        total = float(r["total_amount"] or 0)
+        paid  = float(r.get("total_paid") or 0)
+        rem   = float(r.get("remaining") or total if r["status"]=="Unpaid" else r.get("remaining") or 0)
+        pct   = int((paid/total*100)) if total > 0 else 0
+        badge = "bg-w" if r["status"]=="Partial" else "bg-r"
+        pay_btn = f"<a href='/partial-payments/pay/{r['id']}' class='btn bp' style='font-size:10px;padding:3px 8px'>+ Payment</a>" if show_pay_btn and is_admin() else ""
+        return f"""<tr>
+            <td>{r['date']}</td>
+            <td>{r['vendor']}</td>
+            <td>{r['product']}</td>
+            <td>{pk(total)}</td>
+            <td>
+                <div style="font-size:12px">{pk(paid)}</div>
+                <div style="background:#E2E8F0;border-radius:4px;height:5px;width:80px;margin-top:3px">
+                    <div style="background:#16A34A;border-radius:4px;height:5px;width:{pct}%"></div>
+                </div>
+            </td>
+            <td style="color:#DC2626;font-weight:600">{pk(rem)}</td>
+            <td><span class='badge {badge}'>{r['status']}</span></td>
+            <td>{pay_btn}</td>
+        </tr>"""
+
+    partial_trs = "".join([purchase_row(r) for r in partial_rows]) or "<tr><td colspan='8' style='text-align:center;color:#9CA3AF;padding:12px'>Koi partial payment nahi</td></tr>"
+    unpaid_trs  = "".join([purchase_row(r) for r in unpaid_rows]) or "<tr><td colspan='8' style='text-align:center;color:#9CA3AF;padding:12px'>Koi unpaid record nahi</td></tr>"
+
+    # Partial purchases dropdown ke liye
+    all_pending = partial_rows + unpaid_rows
+    pending_opts = "".join([f"<option value='{r['id']}'>{r['vendor']} — {r['product']} (Baaki: {pk(float(r.get('remaining') or r['total_amount']))})</option>" for r in all_pending])
+
+    body = f"""{flashes()}
+
+    <div class="grid" style="margin-bottom:14px">
+        <div class="met"><div class="ml">Total Purchases</div><div class="mv">{pk(total_purchases)}</div></div>
+        <div class="met"><div class="ml">Total Paid</div><div class="mv g">{pk(total_paid_all)}</div></div>
+        <div class="met"><div class="ml">Partial/Unpaid Baaki</div><div class="mv r">{pk(total_baaki)}</div></div>
+        <div class="met"><div class="ml">Partial Records</div><div class="mv w">{len(partial_rows)}</div></div>
+    </div>
+
+    <!-- PAYMENT ADD FORM -->
+    <div class="card">
+        <div class="ct">Payment Record Karo</div>
+        <form method="POST" action="/partial-payments">
+        <div class="fgrid">
+            <div class="fg">
+                <label>Purchase Select Karo</label>
+                <select name="purchase_id" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option value="">-- Select karo --</option>
+                    {pending_opts}
+                </select>
+            </div>
+            <div class="fg">
+                <label>Payment Amount (PKR)</label>
+                <input name="amount" type="number" step="0.01" placeholder="0" required style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg">
+                <label>Payment Method</label>
+                <select name="payment_method" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option>Cash</option>
+                    <option>Bank Transfer</option>
+                    <option>JazzCash</option>
+                    <option>EasyPaisa</option>
+                    <option>Cheque</option>
+                </select>
+            </div>
+            <div class="fg">
+                <label>Date</label>
+                <input name="payment_date" type="date" id="pp-dt" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg">
+                <label>Notes (Optional)</label>
+                <input name="notes" placeholder="e.g. Bank transfer kiya" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+        </div>
+        <button class="btn bp" type="submit">✓ Payment Save Karo</button>
+        </form>
+    </div>
+
+    <!-- PARTIAL TABLE -->
+    <div class="card">
+        <div class="ct">Partial Payments — Baaki Hai</div>
+        <div class="tw"><table>
+            <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Total</th><th>Paid</th><th>Baaki</th><th>Status</th><th></th></tr></thead>
+            <tbody>{partial_trs}</tbody>
+        </table></div>
+    </div>
+
+    <!-- UNPAID TABLE -->
+    <div class="card">
+        <div class="ct">Unpaid Purchases</div>
+        <div class="tw"><table>
+            <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Total</th><th>Paid</th><th>Baaki</th><th>Status</th><th></th></tr></thead>
+            <tbody>{unpaid_trs}</tbody>
+        </table></div>
+    </div>
+
+    <script>document.getElementById('pp-dt').valueAsDate = new Date();</script>"""
+
+    return layout("Partial Payments", "pp", body)
+
+# ── Quick Pay Route ───────────────────────────────────────────────
+@app.route("/partial-payments/pay/<int:purchase_id>")
+@login_req
+@admin_req
+def quick_pay(purchase_id):
+    conn = get_db()
+    purchase = qry(conn,"SELECT * FROM purchases WHERE id=%s",(purchase_id,)).fetchone()
+    payments  = qry(conn,"SELECT * FROM purchase_payments WHERE purchase_id=%s ORDER BY created_at DESC",(purchase_id,)).fetchall()
+    conn.close()
+
+    if not purchase:
+        return redirect("/partial-payments")
+
+    total   = float(purchase["total_amount"] or 0)
+    paid    = float(purchase.get("total_paid") or 0)
+    rem     = float(purchase.get("remaining") or total)
+    pct     = int(paid/total*100) if total > 0 else 0
+
+    pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td></tr>" for p in payments]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
+
+    body = f"""{flashes()}
+    <a href="/partial-payments" class="btn" style="margin-bottom:14px;display:inline-block">← Wapas</a>
+
+    <div class="g2">
+    <div class="card">
+        <div class="ct">{purchase['vendor']} — {purchase['product']}</div>
+        <div style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid #F1F5F9">
+                <span style="color:#6B7280">Total Amount</span><span style="font-weight:600">{pk(total)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid #F1F5F9">
+                <span style="color:#6B7280">Total Paid</span><span style="color:#16A34A;font-weight:600">{pk(paid)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0">
+                <span style="color:#6B7280">Baaki</span><span style="color:#DC2626;font-weight:600">{pk(rem)}</span>
+            </div>
+        </div>
+        <div style="background:#E2E8F0;border-radius:6px;height:8px;margin-bottom:16px">
+            <div style="background:#16A34A;border-radius:6px;height:8px;width:{pct}%"></div>
+        </div>
+        <form method="POST" action="/partial-payments">
+            <input type="hidden" name="purchase_id" value="{purchase_id}">
+            <div class="fg"><label>Payment Amount</label>
+                <input name="amount" type="number" step="0.01" placeholder="Rs {int(rem):,}" value="{int(rem)}" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <div class="fg"><label>Method</label>
+                <select name="payment_method" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option>Cash</option><option>Bank Transfer</option><option>JazzCash</option><option>EasyPaisa</option>
+                </select>
+            </div>
+            <div class="fg"><label>Date</label>
+                <input name="payment_date" type="date" id="qp-dt" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+            </div>
+            <button class="btn bp" type="submit">✓ Payment Save Karo</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="ct">Payment History</div>
+        <div class="tw"><table>
+            <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>By</th></tr></thead>
+            <tbody>{pay_rows}</tbody>
+        </table></div>
+    </div>
+    </div>
+    <script>document.getElementById('qp-dt').valueAsDate = new Date();</script>"""
+
+    return layout(f"Payment — {purchase['vendor']}", "pp", body)
+
