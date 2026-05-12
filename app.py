@@ -191,8 +191,8 @@ def layout(title, page, body):
     <nav class="sb">
       <div class="sb-brand">📊 <span>Biz</span>Hisaab</div>
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
-      <a href="/purchases" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
-    <a href="/partial-payments" class="{'on' if page=='pp' else ''}">💳 Partial Payments</a>
+<a href="/purchases-summary" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
+<a href="/partial-payments" class="{'on' if page=='pp' else ''}">💳 Partial Payments</a>
       <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
