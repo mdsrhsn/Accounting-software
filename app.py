@@ -187,7 +187,7 @@ def layout(title, page, body):
         <a href="/purchases" class="{'on' if page=='pur' else ''}">&#x1F4E6; Purchases</a>
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>BizHisaab — {title}</title>{CSS}</head><body>
+<title>BizHisaab - {title}</title>{CSS}</head><body>
     <nav class="sb">
       <div class="sb-brand">📊 <span>Biz</span>Hisaab</div>
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
