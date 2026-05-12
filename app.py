@@ -184,7 +184,7 @@ def layout(title, page, body):
         <a href="/pnl" class="{'on' if page=='pnl' else ''}">📊 P&L Report</a>
         <a href="/import" class="{'on' if page=='imp' else ''}">⬆ Import Data</a>
         <a href="/users" class="{'on' if page=='usr' else ''}">👥 Users</a>
-        """
+        """<a href="/purchases" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>BizHisaab — {title}</title>{CSS}</head><body>
