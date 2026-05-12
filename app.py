@@ -2725,3 +2725,513 @@ def quick_pay(purchase_id):
 
     return layout(f"Payment — {purchase['vendor']}", "pp", body)
 
+# ═══════════════════════════════════════════════════════════════════
+# SMART LEDGER — BizHisaab mein add karo
+# ═══════════════════════════════════════════════════════════════════
+#
+# ⚠️ DATA SAFETY GUARANTEE:
+#   - Ye sirf SELECT queries karta hai (read-only)
+#   - Koi UPDATE / DELETE / INSERT nahi
+#   - Existing /purchases route ko touch nahi karta
+#   - Naye routes alag hain: /purchases-summary, /vendors, /vendor/<name>
+#
+# 📋 INSTALLATION:
+#   1. Ye saara code copy karo
+#   2. app.py kholo
+#   3. BILKUL END mein paste karo (if __name__ == '__main__': se PEHLE)
+#   4. GitHub pe push karo → Railway auto-deploy
+#   5. Sidebar mein "Vendors" link ke liye chhota sa edit (neeche batayenge)
+#
+# ═══════════════════════════════════════════════════════════════════
+
+from datetime import datetime, timedelta
+
+# ── Helper: Date Ranges ──────────────────────────────────────────
+def get_date_ranges():
+    """Aaj, Kal, Is Hafte (Monday se), Is Mahine ke date ranges return karta hai"""
+    today_dt = datetime.now().date()
+    yesterday_dt = today_dt - timedelta(days=1)
+
+    # Hafta Monday se shuru
+    week_start = today_dt - timedelta(days=today_dt.weekday())
+
+    # Mahina pehli tareekh se
+    month_start = today_dt.replace(day=1)
+
+    return {
+        "today": today_dt.strftime("%Y-%m-%d"),
+        "yesterday": yesterday_dt.strftime("%Y-%m-%d"),
+        "week_start": week_start.strftime("%Y-%m-%d"),
+        "month_start": month_start.strftime("%Y-%m-%d"),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ROUTE 1: Purchases Summary (Time-based Cards)
+# URL: /purchases-summary
+# Ye ek small dashboard page hai - purchases page ke saath link kar denge
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/purchases-summary")
+@login_req
+def purchases_summary():
+    conn = get_db()
+    dates = get_date_ranges()
+
+    # ── 1. Aaj ki Purchases ──
+    today_data = qry(conn, """
+        SELECT COALESCE(SUM(total_amount),0) AS total,
+               COALESCE(SUM(total_paid),0)   AS paid,
+               COALESCE(SUM(remaining),0)    AS unpaid,
+               COUNT(*)                       AS count
+        FROM purchases WHERE date = %s
+    """, (dates["today"],)).fetchone()
+
+    # ── 2. Kal ki Purchases ──
+    yest_data = qry(conn, """
+        SELECT COALESCE(SUM(total_amount),0) AS total,
+               COALESCE(SUM(total_paid),0)   AS paid,
+               COALESCE(SUM(remaining),0)    AS unpaid,
+               COUNT(*)                       AS count
+        FROM purchases WHERE date = %s
+    """, (dates["yesterday"],)).fetchone()
+
+    # ── 3. Is Hafte ──
+    week_data = qry(conn, """
+        SELECT COALESCE(SUM(total_amount),0) AS total,
+               COALESCE(SUM(total_paid),0)   AS paid,
+               COALESCE(SUM(remaining),0)    AS unpaid,
+               COUNT(*)                       AS count
+        FROM purchases WHERE date >= %s
+    """, (dates["week_start"],)).fetchone()
+
+    # ── 4. Is Mahine ──
+    month_data = qry(conn, """
+        SELECT COALESCE(SUM(total_amount),0) AS total,
+               COALESCE(SUM(total_paid),0)   AS paid,
+               COALESCE(SUM(remaining),0)    AS unpaid,
+               COUNT(*)                       AS count
+        FROM purchases WHERE date >= %s
+    """, (dates["month_start"],)).fetchone()
+
+    # ── Vendor Summary (sab vendors ki summary) ──
+    vendors = qry(conn, """
+        SELECT vendor,
+               COUNT(*)                       AS purchase_count,
+               COALESCE(SUM(total_amount),0)  AS total_amount,
+               COALESCE(SUM(total_paid),0)    AS total_paid,
+               COALESCE(SUM(remaining),0)     AS total_unpaid,
+               MAX(date)                       AS last_purchase
+        FROM purchases
+        WHERE vendor IS NOT NULL AND vendor != ''
+        GROUP BY vendor
+        ORDER BY total_unpaid DESC, total_amount DESC
+    """).fetchall()
+
+    conn.close()
+
+    # ── HTML Build ──
+    def fmt(n):
+        try:
+            return f"{int(float(n)):,}"
+        except:
+            return "0"
+
+    def card(title, data, color):
+        return f"""
+        <div class="sum-card" style="border-left:4px solid {color}">
+            <div class="sc-label">{title}</div>
+            <div class="sc-amount" style="color:{color}">Rs {fmt(data['total'])}</div>
+            <div class="sc-meta">
+                <span>📦 {data['count']} purchases</span>
+                <span class="sc-paid">✓ Paid: Rs {fmt(data['paid'])}</span>
+                <span class="sc-unpaid">⏳ Baaki: Rs {fmt(data['unpaid'])}</span>
+            </div>
+        </div>"""
+
+    cards_html = (
+        card("📅 Aaj ki Purchases", today_data, "#3B82F6") +
+        card("🕐 Kal ki Purchases", yest_data, "#8B5CF6") +
+        card("📊 Is Hafte (Mon se)", week_data, "#10B981") +
+        card("📈 Is Mahine", month_data, "#F59E0B")
+    )
+
+    # ── Vendor Table Rows ──
+    vendor_rows = ""
+    if vendors:
+        for v in vendors:
+            name = v["vendor"] or "Unknown"
+            unpaid_amt = float(v["total_unpaid"] or 0)
+            status_badge = ""
+            if unpaid_amt > 0:
+                status_badge = f'<span class="badge-unpaid">Baaki Rs {fmt(unpaid_amt)}</span>'
+            else:
+                status_badge = '<span class="badge-paid">Sab Clear ✓</span>'
+
+            vendor_rows += f"""
+            <tr>
+                <td><strong>{name}</strong></td>
+                <td style="text-align:center">{v['purchase_count']}</td>
+                <td style="text-align:right;color:#1E40AF;font-weight:600">Rs {fmt(v['total_amount'])}</td>
+                <td style="text-align:right;color:#059669">Rs {fmt(v['total_paid'])}</td>
+                <td style="text-align:right;color:#DC2626;font-weight:600">Rs {fmt(v['total_unpaid'])}</td>
+                <td style="text-align:center;font-size:12px;color:#6B7280">{v['last_purchase'] or '—'}</td>
+                <td style="text-align:center">{status_badge}</td>
+                <td style="text-align:center">
+                    <a href="/vendor/{name}" class="btn-view">👁 Dekho</a>
+                </td>
+            </tr>"""
+    else:
+        vendor_rows = '<tr><td colspan="8" style="text-align:center;padding:20px;color:#6B7280">Abhi koi vendor nahi hai</td></tr>'
+
+    body = f"""
+    <style>
+        .summary-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+        .sum-card {{
+            background: white;
+            padding: 18px 20px;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }}
+        .sc-label {{
+            font-size: 13px;
+            color: #6B7280;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }}
+        .sc-amount {{
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }}
+        .sc-meta {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+            color: #4B5563;
+        }}
+        .sc-paid {{ color: #059669; }}
+        .sc-unpaid {{ color: #DC2626; }}
+
+        .card {{
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }}
+        .ct {{
+            font-size: 17px;
+            font-weight: 700;
+            margin-bottom: 14px;
+            color: #1F2937;
+        }}
+        .tw {{ overflow-x: auto; }}
+        table {{ width: 100%; border-collapse: collapse; }}
+        th {{
+            background: #F9FAFB;
+            padding: 10px 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #E5E7EB;
+        }}
+        td {{
+            padding: 12px;
+            border-bottom: 1px solid #F3F4F6;
+            font-size: 13px;
+        }}
+        tr:hover {{ background: #F9FAFB; }}
+        .badge-paid {{
+            background: #D1FAE5;
+            color: #065F46;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .badge-unpaid {{
+            background: #FEE2E2;
+            color: #991B1B;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .btn-view {{
+            background: #3B82F6;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+        }}
+        .btn-view:hover {{ background: #2563EB; }}
+        .top-nav {{
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }}
+        .nav-link {{
+            background: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #374151;
+            font-size: 13px;
+            font-weight: 500;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }}
+        .nav-link:hover {{ background: #F3F4F6; }}
+        .nav-link.active {{ background: #3B82F6; color: white; }}
+    </style>
+
+    <div class="top-nav">
+        <a href="/purchases" class="nav-link">➕ Add Purchase</a>
+        <a href="/purchases-summary" class="nav-link active">📊 Summary & Vendors</a>
+        <a href="/partial-payments" class="nav-link">💳 Partial Payments</a>
+    </div>
+
+    <!-- Time-based Summary Cards -->
+    <div class="summary-grid">
+        {cards_html}
+    </div>
+
+    <!-- Vendor Smart Ledger -->
+    <div class="card">
+        <div class="ct">🏪 Vendor-wise Ledger ({len(vendors) if vendors else 0} vendors)</div>
+        <div class="tw">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Vendor Name</th>
+                        <th style="text-align:center">Purchases</th>
+                        <th style="text-align:right">Total Amount</th>
+                        <th style="text-align:right">Paid</th>
+                        <th style="text-align:right">Baaki</th>
+                        <th style="text-align:center">Last Purchase</th>
+                        <th style="text-align:center">Status</th>
+                        <th style="text-align:center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>{vendor_rows}</tbody>
+            </table>
+        </div>
+    </div>
+    """
+
+    return layout("Purchases Summary", "purchases", body)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ROUTE 2: Vendor Detail Page
+# URL: /vendor/<vendor_name>
+# Kisi bhi vendor ki saari purchases dekho
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/vendor/<path:vendor_name>")
+@login_req
+def vendor_detail(vendor_name):
+    conn = get_db()
+
+    # Vendor ki saari purchases
+    purchases = qry(conn, """
+        SELECT * FROM purchases
+        WHERE vendor = %s
+        ORDER BY date DESC, id DESC
+    """, (vendor_name,)).fetchall()
+
+    # Vendor ki summary
+    summary = qry(conn, """
+        SELECT COUNT(*)                        AS count,
+               COALESCE(SUM(total_amount),0)   AS total,
+               COALESCE(SUM(total_paid),0)     AS paid,
+               COALESCE(SUM(remaining),0)      AS unpaid,
+               MIN(date)                        AS first_purchase,
+               MAX(date)                        AS last_purchase
+        FROM purchases WHERE vendor = %s
+    """, (vendor_name,)).fetchone()
+
+    conn.close()
+
+    def fmt(n):
+        try:
+            return f"{int(float(n)):,}"
+        except:
+            return "0"
+
+    # Purchase rows
+    rows = ""
+    if purchases:
+        for p in purchases:
+            status = p.get("status") or "Unpaid"
+            status_color = {
+                "Paid": "#D1FAE5;color:#065F46",
+                "Partial": "#FEF3C7;color:#92400E",
+                "Unpaid": "#FEE2E2;color:#991B1B"
+            }.get(status, "#F3F4F6;color:#374151")
+
+            rows += f"""
+            <tr>
+                <td>{p['date']}</td>
+                <td>{p.get('product') or '—'}</td>
+                <td style="text-align:center">{p.get('qty') or 0}</td>
+                <td style="text-align:center">{p.get('unit') or '—'}</td>
+                <td style="text-align:right;color:#1E40AF">Rs {fmt(p.get('per_unit') or 0)}</td>
+                <td style="text-align:right;font-weight:600">Rs {fmt(p.get('total_amount') or 0)}</td>
+                <td style="text-align:right;color:#059669">Rs {fmt(p.get('total_paid') or 0)}</td>
+                <td style="text-align:right;color:#DC2626">Rs {fmt(p.get('remaining') or 0)}</td>
+                <td style="text-align:center">
+                    <span style="background:{status_color};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">{status}</span>
+                </td>
+                <td style="font-size:11px;color:#6B7280">{p.get('notes') or ''}</td>
+            </tr>"""
+    else:
+        rows = '<tr><td colspan="10" style="text-align:center;padding:20px;color:#6B7280">Koi purchase nahi mili</td></tr>'
+
+    unpaid_amt = float(summary["unpaid"] or 0)
+    status_text = "✓ Sab Clear" if unpaid_amt <= 0 else f"⏳ Rs {fmt(unpaid_amt)} Baaki"
+    status_color = "#10B981" if unpaid_amt <= 0 else "#DC2626"
+
+    body = f"""
+    <style>
+        .vendor-header {{
+            background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+            color: white;
+            padding: 24px 28px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }}
+        .vh-name {{
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }}
+        .vh-meta {{
+            font-size: 13px;
+            opacity: 0.9;
+        }}
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
+        }}
+        .stat {{
+            background: white;
+            padding: 16px 18px;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }}
+        .stat-label {{ font-size: 12px; color: #6B7280; margin-bottom: 6px; }}
+        .stat-val {{ font-size: 22px; font-weight: 700; }}
+        .card {{
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }}
+        .ct {{
+            font-size: 17px;
+            font-weight: 700;
+            margin-bottom: 14px;
+            color: #1F2937;
+        }}
+        .tw {{ overflow-x: auto; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+        th {{
+            background: #F9FAFB;
+            padding: 10px 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #E5E7EB;
+        }}
+        td {{
+            padding: 10px 12px;
+            border-bottom: 1px solid #F3F4F6;
+        }}
+        tr:hover {{ background: #F9FAFB; }}
+        .back-btn {{
+            display: inline-block;
+            background: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #374151;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }}
+    </style>
+
+    <a href="/purchases-summary" class="back-btn">← Wapis Vendor List Pe</a>
+
+    <div class="vendor-header">
+        <div class="vh-name">🏪 {vendor_name}</div>
+        <div class="vh-meta">
+            Pehli purchase: {summary['first_purchase'] or '—'} &nbsp;•&nbsp;
+            Aakhri purchase: {summary['last_purchase'] or '—'} &nbsp;•&nbsp;
+            Status: <strong style="color:{status_color};background:white;padding:2px 8px;border-radius:6px;margin-left:4px">{status_text}</strong>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat">
+            <div class="stat-label">Total Purchases</div>
+            <div class="stat-val" style="color:#1F2937">{summary['count']}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Total Amount</div>
+            <div class="stat-val" style="color:#1E40AF">Rs {fmt(summary['total'])}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Paid</div>
+            <div class="stat-val" style="color:#059669">Rs {fmt(summary['paid'])}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Baaki</div>
+            <div class="stat-val" style="color:#DC2626">Rs {fmt(summary['unpaid'])}</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="ct">📋 Saari Purchases ({summary['count']})</div>
+        <div class="tw">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Product</th>
+                        <th style="text-align:center">Qty</th>
+                        <th style="text-align:center">Unit</th>
+                        <th style="text-align:right">Per Unit</th>
+                        <th style="text-align:right">Total</th>
+                        <th style="text-align:right">Paid</th>
+                        <th style="text-align:right">Baaki</th>
+                        <th style="text-align:center">Status</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </div>
+    </div>
+    """
+
+    return layout(f"Vendor: {vendor_name}", "purchases", body)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# END OF SMART LEDGER MODULE
+# ═══════════════════════════════════════════════════════════════════
