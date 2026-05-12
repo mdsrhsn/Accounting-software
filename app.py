@@ -185,9 +185,10 @@ def layout(title, page, body):
         <a href="/import" class="{'on' if page=='imp' else ''}">⬆ Import Data</a>
         <a href="/users" class="{'on' if page=='usr' else ''}">👥 Users</a>
         <a href="/purchases" class="{'on' if page=='pur' else ''}">&#x1F4E6; Purchases</a>
+        """
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>BizHisaab — {title}</title>{CSS}</head><body>
+    <title>BizHisaab &mdash; {title}</title>{CSS}</head><body>
     <nav class="sb">
       <div class="sb-brand">📊 <span>Biz</span>Hisaab</div>
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
@@ -228,7 +229,7 @@ def login():
         err = '<div class="alert al-d">Invalid username or password!</div>'
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>BizHisaab — Login</title>{CSS}
+    <title>BizHisaab &mdash; Login</title>{CSS}
     <style>body{{display:flex;align-items:center;justify-content:center;background:#0F172A;margin-left:0}}
     .box{{background:#fff;border-radius:14px;padding:36px;width:340px;max-width:95vw}}
     .brand{{text-align:center;font-size:22px;font-weight:800;color:#0F172A;margin-bottom:5px}}
