@@ -2959,6 +2959,7 @@ def purchases_summary():
     """
 return layout("Purchases Summary", "purchases", body)
 # ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 # ROUTE 2: Vendor Detail Page
 # URL: /vendor/<vendor_name>
 # ═══════════════════════════════════════════════════════════════════
@@ -2996,111 +2997,34 @@ def vendor_detail(vendor_name):
     if purchases:
         for p in purchases:
             status = p.get("status") or "Unpaid"
-            badge_bg = "#D1FAE5;color:#065F46" if status == "Paid" else (
-                "#FEF3C7;color:#92400E" if status == "Partial" else "#FEE2E2;color:#991B1B"
-            )
-
-            rows += f"""
-            <tr>
-                <td>{p['date']}</td>
-                <td>{p.get('product') or '—'}</td>
-                <td style="text-align:center">{p.get('quantity') or 0}</td>
-                <td style="text-align:center">{p.get('unit') or '—'}</td>
-                <td style="text-align:right;color:#1E40AF">Rs {fmt(p.get('per_unit_price') or 0)}</td>
-                <td style="text-align:right;font-weight:600">Rs {fmt(p.get('total_amount') or 0)}</td>
-                <td style="text-align:center">
-                    <span style="background:{badge_bg};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600">{status}</span>
-                </td>
-                <td style="font-size:11px;color:#6B7280">{p.get('notes') or ''}</td>
-            </tr>"""
+            badge_bg = "#D1FAE5;color:#065F46" if status == "Paid" else ("#FEF3C7;color:#92400E" if status == "Partial" else "#FEE2E2;color:#991B1B")
+            rows += f"<tr><td>{p['date']}</td><td>{p.get('product') or '-'}</td><td style='text-align:center'>{p.get('quantity') or 0}</td><td style='text-align:center'>{p.get('unit') or '-'}</td><td style='text-align:right;color:#1E40AF'>Rs {fmt(p.get('per_unit_price') or 0)}</td><td style='text-align:right;font-weight:600'>Rs {fmt(p.get('total_amount') or 0)}</td><td style='text-align:center'><span style='background:{badge_bg};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600'>{status}</span></td><td style='font-size:11px;color:#6B7280'>{p.get('notes') or ''}</td></tr>"
     else:
-        rows = '<tr><td colspan="8" style="text-align:center;padding:20px;color:#6B7280">Koi purchase nahi mili</td></tr>'
+        rows = "<tr><td colspan='8' style='text-align:center;padding:20px;color:#6B7280'>Koi purchase nahi mili</td></tr>"
 
     unpaid_amt = float(summary["unpaid"] or 0)
-    status_text = "✓ Sab Clear" if unpaid_amt <= 0 else f"⏳ Rs {fmt(unpaid_amt)} Baaki"
+    status_text = "Sab Clear" if unpaid_amt <= 0 else f"Rs {fmt(unpaid_amt)} Baaki"
     status_color = "#10B981" if unpaid_amt <= 0 else "#DC2626"
 
     body = f"""
-    <style>
-        .vendor-header {{
-            background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
-            color: white;
-            padding: 22px 26px;
-            border-radius: 12px;
-            margin-bottom: 18px;
-        }}
-        .vh-name {{ font-size: 24px; font-weight: 700; margin-bottom: 6px; }}
-        .vh-meta {{ font-size: 13px; opacity: 0.95; }}
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 12px;
-            margin-bottom: 18px;
-        }}
-        .stat {{
-            background: white; padding: 14px 16px;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }}
-        .stat-label {{ font-size: 12px; color: #6B7280; margin-bottom: 6px; }}
-        .stat-val {{ font-size: 20px; font-weight: 700; }}
-        .card {{
-            background: white; padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }}
-        .ct {{ font-size: 17px; font-weight: 700; margin-bottom: 14px; color: #1F2937; }}
-        .tw {{ overflow-x: auto; }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-        th {{
-            background: #F9FAFB; padding: 10px 12px;
-            text-align: left; font-size: 12px; font-weight: 600;
-            color: #374151; border-bottom: 2px solid #E5E7EB;
-        }}
-        td {{ padding: 10px 12px; border-bottom: 1px solid #F3F4F6; }}
-        tr:hover {{ background: #F9FAFB; }}
-        .back-btn {{
-            display: inline-block; background: white;
-            padding: 8px 16px; border-radius: 8px;
-            text-decoration: none; color: #374151;
-            font-size: 13px; font-weight: 500;
-            margin-bottom: 14px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }}
-    </style>
+    <a href="/purchases-summary" style="display:inline-block;background:white;padding:8px 16px;border-radius:8px;text-decoration:none;color:#374151;font-size:13px;font-weight:500;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,0.05)">Wapis Vendor List Pe</a>
 
-    <a href="/purchases-summary" class="back-btn">← Wapis Vendor List Pe</a>
-
-    <div class="vendor-header">
-        <div class="vh-name">🏪 {vendor_name}</div>
-        <div class="vh-meta">
-            Pehli purchase: {summary['first_purchase'] or '—'} &nbsp;•&nbsp;
-            Aakhri purchase: {summary['last_purchase'] or '—'} &nbsp;•&nbsp;
-            Status: <strong style="color:{status_color};background:white;padding:2px 8px;border-radius:6px;margin-left:4px">{status_text}</strong>
+    <div style="background:linear-gradient(135deg,#1E40AF 0%,#3B82F6 100%);color:white;padding:22px 26px;border-radius:12px;margin-bottom:18px">
+        <div style="font-size:24px;font-weight:700;margin-bottom:6px">{vendor_name}</div>
+        <div style="font-size:13px;opacity:0.95">
+            Pehli purchase: {summary['first_purchase'] or '-'} | Aakhri purchase: {summary['last_purchase'] or '-'} | Status: <strong style="color:{status_color};background:white;padding:2px 8px;border-radius:6px;margin-left:4px">{status_text}</strong>
         </div>
     </div>
 
-    <div class="stats-grid">
-        <div class="stat">
-            <div class="stat-label">Total Purchases</div>
-            <div class="stat-val" style="color:#1F2937">{summary['count']}</div>
-        </div>
-        <div class="stat">
-            <div class="stat-label">Total Amount</div>
-            <div class="stat-val" style="color:#1E40AF">Rs {fmt(summary['total'])}</div>
-        </div>
-        <div class="stat">
-            <div class="stat-label">Paid</div>
-            <div class="stat-val" style="color:#059669">Rs {fmt(summary['paid'])}</div>
-        </div>
-        <div class="stat">
-            <div class="stat-label">Baaki</div>
-            <div class="stat-val" style="color:#DC2626">Rs {fmt(summary['unpaid'])}</div>
-        </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px">
+        <div class="met"><div class="ml">Total Purchases</div><div class="mv">{summary['count']}</div></div>
+        <div class="met"><div class="ml">Total Amount</div><div class="mv b">Rs {fmt(summary['total'])}</div></div>
+        <div class="met"><div class="ml">Paid</div><div class="mv g">Rs {fmt(summary['paid'])}</div></div>
+        <div class="met"><div class="ml">Baaki</div><div class="mv r">Rs {fmt(summary['unpaid'])}</div></div>
     </div>
 
     <div class="card">
-        <div class="ct">📋 Saari Purchases ({summary['count']})</div>
+        <div class="ct">Saari Purchases ({summary['count']})</div>
         <div class="tw">
             <table>
                 <thead>
@@ -3120,7 +3044,5 @@ def vendor_detail(vendor_name):
         </div>
     </div>
     """
-return layout(f"Vendor: {vendor_name}", "purchases", body)
-# ═══════════════════════════════════════════════════════════════════
-# END OF SMART LEDGER MODULE
-# ═══════════════════════════════════════════════════════════════════
+
+    return layout(f"Vendor: {vendor_name}", "pur", body)
