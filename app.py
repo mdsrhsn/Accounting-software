@@ -2958,8 +2958,7 @@ def purchases_summary():
     </div>
     """
 
-    return layout("Purchases Summary", "purchases", body)
-
+return layout("Purchases Summary", "pur", body)
 
 # ═══════════════════════════════════════════════════════════════════
 # ROUTE 2: Vendor Detail Page
