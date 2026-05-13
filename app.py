@@ -184,19 +184,20 @@ def layout(title, page, body):
         <a href="/pnl" class="{'on' if page=='pnl' else ''}">📊 P&L Report</a>
         <a href="/import" class="{'on' if page=='imp' else ''}">⬆ Import Data</a>
         <a href="/users" class="{'on' if page=='usr' else ''}">👥 Users</a>
-<a href="/purchases-summary" class="{'on' if page=='pur' else ''}">Purchases</a>    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+        """
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BizHisaab - {title}</title>{CSS}</head><body>
     <nav class="sb">
       <div class="sb-brand">📊 <span>Biz</span>Hisaab</div>
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
-<a href="/purchases-summary" class="{'on' if page=='pur' else ''}"> Purchases</a>
-<a href="/partial-payments" class="{'on' if page=='pp' else ''}">💳 Partial Payments</a>
+      <a href="/purchases-summary" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
+      <a href="/partial-payments" class="{'on' if page=='pp' else ''}">💳 Partial Payments</a>
       <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
-    <a href="/returns" class="{'on' if page=='ret' else ''}">↩ Returns</a>
-    <a href="/cashflow" class="{'on' if page=='cf' else ''}">💵 Cash Flow</a>
+      <a href="/returns" class="{'on' if page=='ret' else ''}">↩ Returns</a>
+      <a href="/cashflow" class="{'on' if page=='cf' else ''}">💵 Cash Flow</a>
       {admin_links}
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
@@ -208,7 +209,6 @@ def layout(title, page, body):
       <div class="topbar"><h1>{title}</h1><span style="font-size:11px;color:#6B7280">👤 {session.get('naam','')}</span></div>
       <div class="con">{body}</div>
     </div></body></html>"""
-
 # ── LOGIN ─────────────────────────────────────────────────────────────────────
 @app.route("/", methods=["GET","POST"])
 def login():
