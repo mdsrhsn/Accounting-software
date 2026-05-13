@@ -3120,7 +3120,6 @@ def vendor_detail(vendor_name):
         </div>
     </div>
     """
-
 return layout(f"Vendor: {vendor_name}", "purchases", body)
 # ═══════════════════════════════════════════════════════════════════
 # END OF SMART LEDGER MODULE
