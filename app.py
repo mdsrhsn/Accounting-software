@@ -2957,8 +2957,8 @@ def purchases_summary():
         </div>
     </div>
     """
-return layout("Purchases Summary", "purchases", body)
-# ═══════════════════════════════════════════════════════════════════
+    return layout("Purchases Summary", "purchases", body)
+
 # ═══════════════════════════════════════════════════════════════════
 # ROUTE 2: Vendor Detail Page
 # URL: /vendor/<vendor_name>
