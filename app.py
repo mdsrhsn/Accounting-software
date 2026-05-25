@@ -271,47 +271,181 @@ def dashboard():
     pu  = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0
     ex  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
     co  = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier").fetchone()["v"] or 0
+    co_cnt = qry(conn,"SELECT COUNT(*) as v FROM courier").fetchone()["v"] or 0
+    pu_cnt = qry(conn,"SELECT COUNT(*) as v FROM purchases").fetchone()["v"] or 0
     tad = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
+    ad_cnt = qry(conn,"SELECT COUNT(DISTINCT platform) as v FROM ad_spend").fetchone()["v"] or 0
     inv = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0
     ll  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     lw  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
     net = float(co) - float(pu) - float(ex) - float(tad)
+    networth = float(inv) + net - (float(ll) - float(lw))
+
+    cash_bal = {}
+    for acc in ACCOUNTS:
+        in_  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type IN ('Money In','Opening Balance')",(acc,)).fetchone()["v"] or 0
+        out_ = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type='Money Out'",(acc,)).fetchone()["v"] or 0
+        cash_bal[acc] = float(in_) - float(out_)
+    total_cash = sum(cash_bal.values())
+
+    top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases GROUP BY vendor ORDER BY t DESC LIMIT 1").fetchone()
+    top_acc    = qry(conn,"SELECT account_name, COUNT(*) as cnt, SUM(net_amount) as t FROM courier GROUP BY account_name ORDER BY t DESC LIMIT 1").fetchone()
+
     rpu = qry(conn,"SELECT * FROM purchases ORDER BY created_at DESC LIMIT 5").fetchall()
     rco = qry(conn,"SELECT * FROM courier ORDER BY created_at DESC LIMIT 5").fetchall()
     rex = qry(conn,"SELECT * FROM expenses ORDER BY created_at DESC LIMIT 5").fetchall()
     conn.close()
 
-    pu_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>{'<td class=\"g\"><b>'+pk(r['total_amount'])+'</b></td>' if is_admin() else ''}<td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='7' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-    co_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td><td>{r['type']}</td>{'<td class=\"g\"><b>'+pk(r['net_amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rco]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-    ex_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td><td>{r['description']}</td>{'<td class=\"r\"><b>'+pk(r['amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rex]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    def fmt_lakh(v):
+        v = float(v or 0)
+        if v >= 100000: return f"{v/100000:.1f}L"
+        if v >= 1000:   return f"{v/1000:.0f}K"
+        return f"{int(v)}"
+
+    pu_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td>{'<td class=\"g\"><b>'+pk(r['total_amount'])+'</b></td>' if is_admin() else ''}<td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+
+    co_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td>{'<td class=\"g\"><b>'+pk(r['net_amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rco]) or "<tr><td colspan='3' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+
+    ex_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td>{'<td class=\"r\"><b>'+pk(r['amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rex]) or "<tr><td colspan='3' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+
+    admin_view = ""
+    if is_admin():
+        top_vendor_html = ""
+        if top_vendor:
+            initials = "".join([x[0].upper() for x in (top_vendor['vendor'] or 'NA').split()[:2]])
+            top_vendor_html = f"""
+            <div class="card">
+              <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Top vendor (purchases)</div>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <div style="width:36px;height:36px;border-radius:10px;background:#185FA5;color:white;display:flex;align-items:center;justify-content:center;font-weight:700">{initials}</div>
+                <div>
+                  <div style="font-size:14px;font-weight:600">{top_vendor['vendor']}</div>
+                  <div style="font-size:11px;color:#6B7280">{top_vendor['cnt']} purchases</div>
+                </div>
+              </div>
+              <div style="font-size:20px;font-weight:700">{pk(top_vendor['t'])}</div>
+            </div>"""
+
+        cash_html = f"""
+        <div class="card">
+          <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Cash position</div>
+          <div style="font-size:20px;font-weight:700;margin-bottom:10px">{pk(total_cash)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <div style="flex:1;min-width:70px;background:#E1F5EE;padding:6px 8px;border-radius:6px">
+              <div style="font-size:9px;color:#0F6E56;font-weight:600">CASH</div>
+              <div style="font-size:12px;font-weight:700;color:#04342C">{fmt_lakh(cash_bal.get('Cash in Hand',0))}</div>
+            </div>
+            <div style="flex:1;min-width:70px;background:#E6F1FB;padding:6px 8px;border-radius:6px">
+              <div style="font-size:9px;color:#185FA5;font-weight:600">HBL</div>
+              <div style="font-size:12px;font-weight:700;color:#042C53">{fmt_lakh(cash_bal.get('Bank (HBL/MCB)',0))}</div>
+            </div>
+            <div style="flex:1;min-width:70px;background:#FAEEDA;padding:6px 8px;border-radius:6px">
+              <div style="font-size:9px;color:#854F0B;font-weight:600">JC</div>
+              <div style="font-size:12px;font-weight:700;color:#412402">{fmt_lakh(cash_bal.get('JazzCash',0))}</div>
+            </div>
+          </div>
+        </div>"""
+
+        admin_view = f"""
+        <!-- HERO -->
+        <div style="background:#0F172A;border-radius:12px;padding:18px 20px;margin-bottom:12px;color:white">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-size:12px;opacity:0.7;margin-bottom:4px">Welcome back, {session.get('naam','')}</div>
+              <div style="font-size:22px;font-weight:600">Aaj ka hisaab</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;opacity:0.7">Estimated Net Worth</div>
+              <div style="font-size:22px;font-weight:600">{pk(networth)}</div>
+              <div style="font-size:11px;color:#5DCAA5;margin-top:2px">↗ Live</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);flex-wrap:wrap">
+            <a href="/dashboard" style="background:#1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:white;text-decoration:none">All Time</a>
+            <a href="/pnl" style="background:transparent;border:1px solid #1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:#94A3B8;text-decoration:none">P&L Report</a>
+            <a href="/cashflow" style="background:transparent;border:1px solid #1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:#94A3B8;text-decoration:none">Cash Flow</a>
+            <a href="/courier" style="background:transparent;border:1px solid #1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:#94A3B8;text-decoration:none">Courier</a>
+          </div>
+        </div>
+
+        <!-- COLOR CARDS -->
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
+          <div style="background:#185FA5;color:white;padding:16px;border-radius:12px">
+            <div style="font-size:22px;margin-bottom:8px">🚚</div>
+            <div style="font-size:11px;opacity:0.85;margin-bottom:2px">Courier Income</div>
+            <div style="font-size:18px;font-weight:700">{fmt_lakh(co)}</div>
+            <div style="font-size:10px;opacity:0.75;margin-top:4px">{int(co_cnt)} settlements</div>
+          </div>
+          <div style="background:#0F6E56;color:white;padding:16px;border-radius:12px">
+            <div style="font-size:22px;margin-bottom:8px">📈</div>
+            <div style="font-size:11px;opacity:0.85;margin-bottom:2px">Net Profit/Loss</div>
+            <div style="font-size:18px;font-weight:700">{fmt_lakh(net)}</div>
+            <div style="font-size:10px;opacity:0.75;margin-top:4px">{'Profit' if net>=0 else 'Loss'}</div>
+          </div>
+          <div style="background:#A32D2D;color:white;padding:16px;border-radius:12px">
+            <div style="font-size:22px;margin-bottom:8px">📦</div>
+            <div style="font-size:11px;opacity:0.85;margin-bottom:2px">Purchases</div>
+            <div style="font-size:18px;font-weight:700">{fmt_lakh(pu)}</div>
+            <div style="font-size:10px;opacity:0.75;margin-top:4px">{int(pu_cnt)} entries</div>
+          </div>
+          <div style="background:#854F0B;color:white;padding:16px;border-radius:12px">
+            <div style="font-size:22px;margin-bottom:8px">📣</div>
+            <div style="font-size:11px;opacity:0.85;margin-bottom:2px">Ad Spend</div>
+            <div style="font-size:18px;font-weight:700">{fmt_lakh(tad)}</div>
+            <div style="font-size:10px;opacity:0.75;margin-top:4px">{int(ad_cnt)} platforms</div>
+          </div>
+        </div>
+
+        <!-- TOP VENDOR + CASH -->
+        <div class="g2" style="margin-bottom:12px">
+          {top_vendor_html}
+          {cash_html}
+        </div>
+
+        <!-- QUICK ACTIONS -->
+        <div class="card" style="margin-bottom:12px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:12px">Quick Actions</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+            <a href="/purchases" style="background:#E6F1FB;padding:14px 8px;border-radius:10px;text-align:center;text-decoration:none">
+              <div style="font-size:20px;margin-bottom:4px">➕</div>
+              <div style="font-size:11px;color:#042C53;font-weight:600">Add Purchase</div>
+            </a>
+            <a href="/expenses" style="background:#FCEBEB;padding:14px 8px;border-radius:10px;text-align:center;text-decoration:none">
+              <div style="font-size:20px;margin-bottom:4px">💸</div>
+              <div style="font-size:11px;color:#501313;font-weight:600">Add Expense</div>
+            </a>
+            <a href="/courier" style="background:#E1F5EE;padding:14px 8px;border-radius:10px;text-align:center;text-decoration:none">
+              <div style="font-size:20px;margin-bottom:4px">🚚</div>
+              <div style="font-size:11px;color:#04342C;font-weight:600">Courier Pay</div>
+            </a>
+            <a href="/cashflow" style="background:#FAEEDA;padding:14px 8px;border-radius:10px;text-align:center;text-decoration:none">
+              <div style="font-size:20px;margin-bottom:4px">💵</div>
+              <div style="font-size:11px;color:#412402;font-weight:600">Cash Flow</div>
+            </a>
+          </div>
+        </div>
+        """
+
+    employee_view = "" if is_admin() else '<div class="card" style="background:#EFF6FF;border:none"><div style="font-size:13px;color:#1E40AF;padding:8px">👋 Welcome! Use sidebar to add Purchases, Expenses, Courier or Ad Spend.</div></div>'
 
     body = f"""{flashes()}
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-size:12px;color:#6B7280">Business Overview</div>
-      {f'<a href="/export/all" class="btn bs" style="font-size:12px">⬇ Export All Data (Excel)</a>' if is_admin() else ''}
-    </div>
-    {f'''<div class="grid">
-      <div class="met"><div class="ml">Courier Income</div><div class="mv g">{pk(co)}</div></div>
-      <div class="met"><div class="ml">Total Purchases</div><div class="mv r">{pk(pu)}</div></div>
-      <div class="met"><div class="ml">Total Expenses</div><div class="mv r">{pk(ex)}</div></div>
-      <div class="met"><div class="ml">Ad Spend</div><div class="mv r">{pk(tad)}</div></div>
-      <div class="met"><div class="ml">Net Profit/Loss</div><div class="mv {"g" if net>=0 else "r"}">{pk(net)}</div></div>
-      <div class="met"><div class="ml">Investment</div><div class="mv b">{pk(inv)}</div></div>
-      <div class="met"><div class="ml">Outstanding Loan</div><div class="mv w">{pk(float(ll)-float(lw))}</div></div>
-    </div>''' if is_admin() else '<div class="card" style="background:#EFF6FF;border:none"><div style="font-size:13px;color:#1E40AF;padding:8px">👋 Welcome! Use sidebar to add Purchases, Expenses, Courier or Ad Spend.</div></div>'}
+    {admin_view}
+    {employee_view}
+
     <div class="g2">
       <div class="card"><div class="ct">Recent Purchases</div><div class="tw"><table>
-        <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th>{f'<th>Amount</th>' if is_admin() else ''}<th>Status</th></tr></thead>
+        <thead><tr><th>Date</th><th>Vendor</th><th>Product</th>{'<th>Amount</th>' if is_admin() else ''}<th>Status</th></tr></thead>
         <tbody>{pu_rows}</tbody></table></div></div>
       <div class="card"><div class="ct">Recent Courier</div><div class="tw"><table>
-        <thead><tr><th>Date</th><th>Courier</th><th>Type</th>{f'<th>Net Amount</th>' if is_admin() else ''}</tr></thead>
+        <thead><tr><th>Date</th><th>Courier</th>{'<th>Net Amount</th>' if is_admin() else ''}</tr></thead>
         <tbody>{co_rows}</tbody></table></div></div>
     </div>
-    <div class="card"><div class="ct">Recent Expenses</div><div class="tw"><table>
-      <thead><tr><th>Date</th><th>Category</th><th>Description</th>{f'<th>Amount</th>' if is_admin() else ''}</tr></thead>
-      <tbody>{ex_rows}</tbody></table></div></div>"""
-    return layout("Dashboard","dash",body)
 
+    <div class="card"><div class="ct">Recent Expenses</div><div class="tw"><table>
+      <thead><tr><th>Date</th><th>Category</th>{'<th>Amount</th>' if is_admin() else ''}</tr></thead>
+      <tbody>{ex_rows}</tbody></table></div></div>"""
+
+    return layout("Dashboard","dash",body)
 # ── PURCHASES ─────────────────────────────────────────────────────────────────
 @app.route("/purchases", methods=["GET","POST"])
 @login_req
