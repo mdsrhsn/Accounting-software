@@ -267,19 +267,68 @@ def logout():
 @app.route("/dashboard")
 @login_req
 def dashboard():
+    from datetime import timedelta
     conn = get_db()
-    pu  = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0
-    ex  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
-    co  = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier").fetchone()["v"] or 0
-    co_cnt = qry(conn,"SELECT COUNT(*) as v FROM courier").fetchone()["v"] or 0
-    pu_cnt = qry(conn,"SELECT COUNT(*) as v FROM purchases").fetchone()["v"] or 0
-    tad = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
-    ad_cnt = qry(conn,"SELECT COUNT(DISTINCT platform) as v FROM ad_spend").fetchone()["v"] or 0
+
+    # ── DATE FILTER ───────────────────────────────────────────────
+    period = request.args.get("period", "all")
+    custom_from = request.args.get("from", "")
+    custom_to = request.args.get("to", "")
+    today_d = date.today()
+
+    if period == "today":
+        d_from = d_to = str(today_d)
+        period_label = "Today"
+    elif period == "yesterday":
+        y = today_d - timedelta(days=1)
+        d_from = d_to = str(y)
+        period_label = "Yesterday"
+    elif period == "7days":
+        d_from = str(today_d - timedelta(days=6))
+        d_to = str(today_d)
+        period_label = "Last 7 Days"
+    elif period == "month":
+        d_from = str(today_d.replace(day=1))
+        d_to = str(today_d)
+        period_label = "This Month"
+    elif period == "custom" and custom_from and custom_to:
+        d_from, d_to = custom_from, custom_to
+        period_label = f"{d_from} to {d_to}"
+    else:
+        period = "all"
+        d_from = d_to = ""
+        period_label = "All Time"
+
+    if d_from and d_to:
+        w_pu  = "WHERE date>=%s AND date<=%s AND status!='Unpaid'"
+        w_ex  = "WHERE date>=%s AND date<=%s"
+        w_co  = "WHERE date>=%s AND date<=%s"
+        w_ad  = "WHERE date>=%s AND date<=%s"
+        p2 = (d_from, d_to)
+    else:
+        w_pu  = "WHERE status!='Unpaid'"
+        w_ex  = w_co = w_ad = ""
+        p2 = ()
+
+    # ── DATA QUERIES ──────────────────────────────────────────────
+    pu  = qry(conn,f"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases {w_pu}",p2).fetchone()["v"] or 0
+    ex  = qry(conn,f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w_ex}",p2).fetchone()["v"] or 0
+    co  = qry(conn,f"SELECT COALESCE(SUM(net_amount),0) as v FROM courier {w_co}",p2).fetchone()["v"] or 0
+    co_cnt = qry(conn,f"SELECT COUNT(*) as v FROM courier {w_co}",p2).fetchone()["v"] or 0
+    pu_cnt = qry(conn,f"SELECT COUNT(*) as v FROM purchases {w_pu}",p2).fetchone()["v"] or 0
+    tad = qry(conn,f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w_ad}",p2).fetchone()["v"] or 0
+    ad_cnt = qry(conn,f"SELECT COUNT(DISTINCT platform) as v FROM ad_spend {w_ad}",p2).fetchone()["v"] or 0
+
+    # Net worth & loans (all-time always)
     inv = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0
     ll  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     lw  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
     net = float(co) - float(pu) - float(ex) - float(tad)
-    networth = float(inv) + net - (float(ll) - float(lw))
+    co_all = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier").fetchone()["v"] or 0
+    pu_all = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0
+    ex_all = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
+    ad_all = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
+    networth = float(inv) + (float(co_all) - float(pu_all) - float(ex_all) - float(ad_all)) - (float(ll) - float(lw))
 
     cash_bal = {}
     for acc in ACCOUNTS:
@@ -288,8 +337,10 @@ def dashboard():
         cash_bal[acc] = float(in_) - float(out_)
     total_cash = sum(cash_bal.values())
 
-    top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases GROUP BY vendor ORDER BY t DESC LIMIT 1").fetchone()
-    top_acc    = qry(conn,"SELECT account_name, COUNT(*) as cnt, SUM(net_amount) as t FROM courier GROUP BY account_name ORDER BY t DESC LIMIT 1").fetchone()
+    if d_from and d_to:
+        top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
+    else:
+        top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases GROUP BY vendor ORDER BY t DESC LIMIT 1").fetchone()
 
     rpu = qry(conn,"SELECT * FROM purchases ORDER BY created_at DESC LIMIT 5").fetchall()
     rco = qry(conn,"SELECT * FROM courier ORDER BY created_at DESC LIMIT 5").fetchall()
@@ -298,24 +349,29 @@ def dashboard():
 
     def fmt_lakh(v):
         v = float(v or 0)
-        if v >= 100000: return f"{v/100000:.1f}L"
-        if v >= 1000:   return f"{v/1000:.0f}K"
+        if abs(v) >= 100000: return f"{v/100000:.1f}L"
+        if abs(v) >= 1000:   return f"{v/1000:.0f}K"
         return f"{int(v)}"
 
+    # ── PERIOD TABS ───────────────────────────────────────────────
+    def tab(p, label):
+        active = "background:#1E293B;color:white" if period==p else "background:transparent;border:1px solid #1E293B;color:#94A3B8"
+        return f'<a href="/dashboard?period={p}" style="{active};padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none">{label}</a>'
+
+    custom_active = "background:#1E293B;color:white" if period=="custom" else "background:transparent;border:1px solid #1E293B;color:#94A3B8"
+
     pu_rows = "".join([f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td>{'<td class=\"g\"><b>'+pk(r['total_amount'])+'</b></td>' if is_admin() else ''}<td><span class='badge {'bg-g' if r['status']=='Paid' else 'bg-r' if r['status']=='Unpaid' else 'bg-w'}'>{r['status']}</span></td></tr>" for r in rpu]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-
     co_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['courier_name']}</span></td>{'<td class=\"g\"><b>'+pk(r['net_amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rco]) or "<tr><td colspan='3' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-
     ex_rows = "".join([f"<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td>{'<td class=\"r\"><b>'+pk(r['amount'])+'</b></td>' if is_admin() else ''}</tr>" for r in rex]) or "<tr><td colspan='3' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
     admin_view = ""
     if is_admin():
         top_vendor_html = ""
-        if top_vendor:
+        if top_vendor and top_vendor['vendor']:
             initials = "".join([x[0].upper() for x in (top_vendor['vendor'] or 'NA').split()[:2]])
             top_vendor_html = f"""
             <div class="card">
-              <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Top vendor (purchases)</div>
+              <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Top vendor ({period_label})</div>
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
                 <div style="width:36px;height:36px;border-radius:10px;background:#185FA5;color:white;display:flex;align-items:center;justify-content:center;font-weight:700">{initials}</div>
                 <div>
@@ -325,10 +381,12 @@ def dashboard():
               </div>
               <div style="font-size:20px;font-weight:700">{pk(top_vendor['t'])}</div>
             </div>"""
+        else:
+            top_vendor_html = '<div class="card"><div style="font-size:12px;color:#6B7280;margin-bottom:10px">Top vendor</div><div style="color:#9CA3AF;font-size:13px;padding:14px 0">No purchases in this period</div></div>'
 
         cash_html = f"""
         <div class="card">
-          <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Cash position</div>
+          <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Cash position (current)</div>
           <div style="font-size:20px;font-weight:700;margin-bottom:10px">{pk(total_cash)}</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <div style="flex:1;min-width:70px;background:#E1F5EE;padding:6px 8px;border-radius:6px">
@@ -346,6 +404,20 @@ def dashboard():
           </div>
         </div>"""
 
+        custom_form = ""
+        if period == "custom":
+            custom_form = f"""
+            <div style="margin-top:10px;padding:10px;background:#1E293B;border-radius:8px">
+              <form method="GET" action="/dashboard" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="hidden" name="period" value="custom">
+                <label style="font-size:11px;color:#94A3B8">From:</label>
+                <input type="date" name="from" value="{custom_from}" style="padding:5px 8px;border:none;border-radius:5px;font-size:12px;background:#0F172A;color:white">
+                <label style="font-size:11px;color:#94A3B8">To:</label>
+                <input type="date" name="to" value="{custom_to}" style="padding:5px 8px;border:none;border-radius:5px;font-size:12px;background:#0F172A;color:white">
+                <button type="submit" style="background:#3B82F6;color:white;padding:5px 14px;border:none;border-radius:5px;font-size:12px;cursor:pointer">Apply</button>
+              </form>
+            </div>"""
+
         admin_view = f"""
         <!-- HERO -->
         <div style="background:#0F172A;border-radius:12px;padding:18px 20px;margin-bottom:12px;color:white">
@@ -353,19 +425,22 @@ def dashboard():
             <div>
               <div style="font-size:12px;opacity:0.7;margin-bottom:4px">Welcome back, {session.get('naam','')}</div>
               <div style="font-size:22px;font-weight:600">Aaj ka hisaab</div>
+              <div style="font-size:11px;color:#5DCAA5;margin-top:4px">Showing: {period_label}</div>
             </div>
             <div style="text-align:right">
-              <div style="font-size:11px;opacity:0.7">Estimated Net Worth</div>
+              <div style="font-size:11px;opacity:0.7">Estimated Net Worth (All time)</div>
               <div style="font-size:22px;font-weight:600">{pk(networth)}</div>
-              <div style="font-size:11px;color:#5DCAA5;margin-top:2px">↗ Live</div>
             </div>
           </div>
           <div style="display:flex;gap:6px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);flex-wrap:wrap">
-            <a href="/dashboard" style="background:#1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:white;text-decoration:none">All Time</a>
-            <a href="/pnl" style="background:transparent;border:1px solid #1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:#94A3B8;text-decoration:none">P&L Report</a>
-            <a href="/cashflow" style="background:transparent;border:1px solid #1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:#94A3B8;text-decoration:none">Cash Flow</a>
-            <a href="/courier" style="background:transparent;border:1px solid #1E293B;padding:6px 14px;border-radius:6px;font-size:12px;color:#94A3B8;text-decoration:none">Courier</a>
+            {tab('today','Today')}
+            {tab('yesterday','Yesterday')}
+            {tab('7days','7 Days')}
+            {tab('month','This Month')}
+            {tab('all','All Time')}
+            <a href="/dashboard?period=custom" style="{custom_active};padding:6px 14px;border-radius:6px;font-size:12px;text-decoration:none">Custom</a>
           </div>
+          {custom_form}
         </div>
 
         <!-- COLOR CARDS -->
