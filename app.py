@@ -1003,7 +1003,7 @@ def cashbank():
         conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
-    for acc in ACCOUNTS:
+    for acc in ACC_LIST:
         bal = balances[acc]
         col = "#16A34A" if bal >= 0 else "#DC2626"
         acc_btns += f"<a href='/cashbank?acc={acc}' class='btn {'bp' if acc_filter==acc else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px;border:1px solid #E2E8F0'>{acc}<br><small style='color:{col}'>{pk(bal)}</small></a>"
@@ -1026,11 +1026,12 @@ def cashbank():
             del_btn = f"<a href='/cashbank/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a>" if session.get('role')=='admin' else ""
             trs += f"<tr><td>{r['date']}</td><td><span class='badge bg-b'>{r['account']}</span></td><td><span class='badge {badge}'>{r['type']}</span></td><td>{r['description'] or '—'}</td><td class='{col}'><b>{sign} {pk(r['amount'])}</b></td><td style='font-weight:700;color:{bal_col}'>{pk(bal)}</td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td><td>{del_btn}</td></tr>"
 
-    acc_opts = "".join([f"<option>{a}</option>" for a in ACCOUNTS])
+    acc_opts = "".join([f"<option>{a}</option>" for a in ACC_LIST])
     body = f"""{flashes()}
     <div class="grid">
       <div class="met"><div class="ml">Total Balance</div><div class="mv {'g' if total_bal>=0 else 'r'}">{pk(total_bal)}</div></div>
-      {"".join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {"g" if balances[acc]>=0 else "r"}">{pk(balances[acc])}</div></div>' for acc in ACCOUNTS])}
+      {"".join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {"g" if balances[acc]>=0 else "r"}">{pk(balances[acc])}</div></div>' for acc in ACC_LIST
+])}
     </div>
     <div class="card"><div class="ct">Add Entry</div>
     <form method="POST" action="/cashbank"><div class="fgrid">
