@@ -927,7 +927,7 @@ def loan():
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Loan record saved!"))
         return redirect("/loan")
-  acc_opts_loan = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
+acc_opts_loan = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows  = qry(conn,"SELECT * FROM loans ORDER BY created_at DESC").fetchall()
     taken = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     repaid= qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
