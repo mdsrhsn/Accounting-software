@@ -550,11 +550,12 @@ def purchases():
         total = float(f.get("total_amount") or 0)
         per_u = round(total/qty,2) if qty else 0
         st    = f.get("status","Paid")
-        qry(conn,"INSERT INTO purchases (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (f.get("date") or today(), f.get("vendor",""), f.get("product",""), qty, f.get("unit","Piece"), total, per_u, st, f.get("notes",""), session.get("naam","")))
+        qry(conn,"INSERT INTO purchases (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by,paid_from_account) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (f.get("date") or today(), f.get("vendor",""), f.get("product",""), qty, f.get("unit","Piece"), total, per_u, st, f.get("notes",""), session.get("naam",""), f.get("paid_from_account","")))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Purchase saved!"))
         return redirect("/purchases")
+    acc_opts_purchase = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows   = qry(conn,"SELECT * FROM purchases ORDER BY created_at DESC").fetchall()
     total  = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases").fetchone()["v"] or 0
     paid   = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status='Paid'").fetchone()["v"] or 0
@@ -578,6 +579,7 @@ def purchases():
       <div class="fg"><label>Quantity</label><input name="quantity" type="number" step="0.01" value="1" id="qty" oninput="calc()"></div>
       <div class="fg"><label>Unit</label><select name="unit" onchange="calc()"><option>Piece</option><option>Dozen</option><option>Box</option><option>Kg</option><option>Man</option><option>Other</option></select></div>
       <div class="fg"><label>Total Amount Paid (PKR)</label><input name="total_amount" type="number" step="0.01" placeholder="0" id="tot" oninput="calc()"></div>
+      <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_purchase}</select></div>
       <div class="fg"><label>Payment Status</label><select name="status"><option>Paid</option><option>Unpaid</option><option>Partial</option></select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
       <div class="fg"><label>Notes</label><input name="notes" placeholder="Optional"></div>
