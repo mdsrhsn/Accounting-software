@@ -921,13 +921,12 @@ def loan():
     conn = get_db()
     if request.method == "POST":
         f = request.form
-        qry(conn,"INSERT INTO loans (date,person,type,amount,added_by,account) VALUES (%s,%s,%s,%s,%s,%s)",
-                (f.get("date") or today(), f.get("person",""), f.get("type","Loan Taken"),
-                 float(f.get("amount") or 0), session.get("naam",""), f.get("account","")))
+        qry(conn,"INSERT INTO loans (date,person,type,amount,added_by) VALUES (%s,%s,%s,%s,%s)",
+            (f.get("date") or today(), f.get("person",""), f.get("type","Loan Taken"),
+             float(f.get("amount") or 0), session.get("naam","")))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Loan record saved!"))
         return redirect("/loan")
-acc_opts_loan = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows  = qry(conn,"SELECT * FROM loans ORDER BY created_at DESC").fetchall()
     taken = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     repaid= qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
@@ -939,7 +938,6 @@ acc_opts_loan = "".join([f"<option value='{a}'>{a}</option>" for a in get_accoun
       <div class="fg"><label>Person Name</label><input name="person" placeholder="e.g. Brother, Hamza" required></div>
       <div class="fg"><label>Type</label><select name="type"><option>Loan Taken</option><option>Loan Repaid</option></select></div>
       <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
-      <div class="fg"><label>Paid From / To Account</label><select name="account">{acc_opts_loan}</select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div><button class="btn bp" type="submit">✓ Save</button></form></div>
     <div class="grid" style="margin-bottom:14px">
