@@ -622,12 +622,13 @@ def expenses():
     cats = [r["name"] for r in qry(conn,"SELECT name FROM exp_categories ORDER BY name").fetchall()]
     if request.method == "POST":
         f = request.form
-        qry(conn,"INSERT INTO expenses (date,category,description,paid_to,amount,payment_method,added_by) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (f.get("date") or today(), f.get("category",""), f.get("description",""),
-             f.get("paid_to",""), float(f.get("amount") or 0), f.get("payment_method","Cash"), session.get("naam","")))
+        qry(conn,"INSERT INTO expenses (date,category,description,paid_to,amount,payment_method,added_by,paid_from_account) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (f.get("date") or today(), f.get("category",""), f.get("description",""),
+                 f.get("paid_to",""), float(f.get("amount") or 0), f.get("payment_method","Cash"), session.get("naam",""), f.get("paid_from_account","")))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Expense saved!"))
         return redirect("/expenses")
+    acc_opts_exp = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows  = qry(conn,"SELECT * FROM expenses ORDER BY created_at DESC").fetchall()
     total = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
     by_cat= qry(conn,"SELECT category, SUM(amount) t FROM expenses GROUP BY category ORDER BY t DESC").fetchall()
@@ -658,6 +659,7 @@ def expenses():
       <div class="fg"><label>Description</label><input name="description" placeholder="Details" required></div>
       <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
       <div class="fg"><label>Paid To</label><input name="paid_to" placeholder="Optional"></div>
+     <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_exp}</select></div>
       <div class="fg"><label>Payment Method</label><select name="payment_method"><option>Cash</option><option>JazzCash</option><option>EasyPaisa</option><option>Bank Transfer</option><option>Cheque</option></select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div>
