@@ -1500,12 +1500,12 @@ def adspend():
                 total_pkr   = round(pkr_amt + tax_amt, 2)
 
         qry(conn,"""INSERT INTO ad_spend
-            (date,ad_account_id,ad_account_name,platform,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by,period_from,period_to)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (f.get("date") or today(), acc_id, acc_name, platform, site,
-             dollar_amt, dollar_rate, pkr_amt, tax_amt, total_pkr,
-             f.get("description",""), session.get("naam",""),
-             f.get("period_from",""), f.get("period_to","")))
+            (date,ad_account_id,ad_account_name,platform,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by,period_from,period_to,paid_from_account)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (f.get("date") or today(), acc_id, acc_name, platform, site,
+                 dollar_amt, dollar_rate, pkr_amt, tax_amt, total_pkr,
+                 f.get("description",""), session.get("naam",""),
+                 f.get("period_from",""), f.get("period_to",""), f.get("paid_from_account","")))
         conn.commit()
         session.setdefault('_flashes',[]).append(("success","Ad spend saved!"))
         conn.close()
@@ -1522,6 +1522,7 @@ def adspend():
     if plat_filter: sql += " AND platform=%s"; params.append(plat_filter)
     if site_filter: sql += " AND site=%s"; params.append(site_filter)
     sql += " ORDER BY created_at DESC"
+    acc_opts_ad = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows = qry(conn, sql, params).fetchall()
 
     # Totals
@@ -1657,6 +1658,7 @@ def adspend():
       <div class="fg"><label>Ad Period — From</label><input name="period_from" type="date" id="pf"></div>
       <div class="fg"><label>Ad Period — To</label><input name="period_to" type="date" id="pt"></div>
       <div class="fg"><label>Description</label><input name="description" placeholder="Campaign details"></div>
+      <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_ad}</select></div>
     </div>
 
     <!-- PKR Account — Dollar Purchase -->
