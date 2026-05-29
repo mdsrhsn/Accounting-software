@@ -984,13 +984,23 @@ def cashbank():
     else:
         rows = qry(conn,"SELECT * FROM cashbank ORDER BY date ASC, created_at ASC").fetchall()
 
-    balances = {}
-    for acc in ACCOUNTS:
-        in_  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type IN ('Money In','Opening Balance')",(acc,)).fetchone()["v"] or 0
-        out_ = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type='Money Out'",(acc,)).fetchone()["v"] or 0
-        balances[acc] = float(in_) - float(out_)
-    total_bal = sum(balances.values())
-    conn.close()
+   # Dynamic account list: default + courier banks
+        ACC_LIST = get_accounts()
+
+        balances = {}
+        for acc in ACC_LIST:
+            # Manual entries (opening balance, money in/out)
+            in_  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type IN ('Money In','Opening Balance')",(acc,)).fetchone()["v"] or 0
+            out_ = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type='Money Out'",(acc,)).fetchone()["v"] or 0
+            # Courier income — match by bank_holder + bank_name
+            courier_in = qry(conn,"SELECT COALESCE(SUM(c.net_amount),0) as v FROM courier c JOIN courier_accounts ca ON ca.name = c.account_name WHERE %s = ca.bank_holder || ' — ' || ca.bank_name",(acc,)).fetchone()["v"] or 0
+            # Outflows
+            pu_out = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE paid_from_account=%s AND status!='Unpaid'",(acc,)).fetchone()["v"] or 0
+            ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+            ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+            balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
+        total_bal = sum(balances.values())
+        conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
     for acc in ACCOUNTS:
