@@ -171,7 +171,25 @@ def flashes():
     msgs = session.pop('_flashes', [])
     return "".join([f'<div class="alert {"al-s" if c=="success" else "al-d" if c=="danger" else "al-i"}">{m}</div>' for c,m in msgs])
 
-ACCOUNTS = ["Cash in Hand","Bank (HBL/MCB)","JazzCash","EasyPaisa"]
+DEFAULT_ACCOUNTS = ["Cash in Hand","Bank (HBL/MCB)","JazzCash","EasyPaisa"]
+
+def get_accounts():
+    """Returns combined list: default 4 + courier bank accounts (auto-synced)"""
+    try:
+        conn = get_db()
+        courier_banks = qry(conn,"SELECT DISTINCT bank_holder, bank_name FROM courier_accounts WHERE active=TRUE AND bank_name IS NOT NULL AND bank_name!=''").fetchall()
+        conn.close()
+        custom = []
+        for b in courier_banks:
+            if b['bank_name'] and b['bank_holder']:
+                label = f"{b['bank_holder']} — {b['bank_name']}"
+                if label not in custom:
+                    custom.append(label)
+        return DEFAULT_ACCOUNTS + custom
+    except:
+        return DEFAULT_ACCOUNTS
+
+ACCOUNTS = DEFAULT_ACCOUNTS  # Backward compatibility — kept so existing code works
 
 def layout(title, page, body):
     admin_links = ""
