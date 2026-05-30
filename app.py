@@ -921,23 +921,25 @@ def loan():
     conn = get_db()
     if request.method == "POST":
         f = request.form
-        qry(conn,"INSERT INTO loans (date,person,type,amount,added_by) VALUES (%s,%s,%s,%s,%s)",
-            (f.get("date") or today(), f.get("person",""), f.get("type","Loan Taken"),
-             float(f.get("amount") or 0), session.get("naam","")))
+        qry(conn,"INSERT INTO loans (date,person,type,amount,added_by,account) VALUES (%s,%s,%s,%s,%s,%s)",
+                (f.get("date") or today(), f.get("person",""), f.get("type","Loan Taken"),
+                 float(f.get("amount") or 0), session.get("naam",""), f.get("account","")))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Loan record saved!"))
         return redirect("/loan")
+    acc_opts_loan = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows  = qry(conn,"SELECT * FROM loans ORDER BY created_at DESC").fetchall()
     taken = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     repaid= qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
     conn.close()
-    trs = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td><span class='badge {'bg-r' if r['type']=='Loan Taken' else 'bg-g'}'>{r['type']}</span></td><td style='font-weight:600;color:{'#DC2626' if r['type']=='Loan Taken' else '#16A34A'}'>{pk(r['amount'])}</td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td><td><a href='/loan/del/{r['id']}' class='btn bd' onclick=\"return confirm('Delete?')\">Del</a></td></tr>" for r in rows]) or "<tr><td colspan='6' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    trs = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td><span class='badge {'bg-r' if r['type']=='Loan Taken' else 'bg-g'}'>{r['type']}</span></td><td style='font-weight:600;color:{'#DC2626' if r['type']=='Loan Taken' else '#16A34A'}'>{pk(r['amount'])}</td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td></tr>" for r in rows]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
     body = f"""{flashes()}
     <div class="card"><div class="ct">Add Loan Record</div>
     <form method="POST" action="/loan"><div class="fgrid">
       <div class="fg"><label>Person Name</label><input name="person" placeholder="e.g. Brother, Hamza" required></div>
       <div class="fg"><label>Type</label><select name="type"><option>Loan Taken</option><option>Loan Repaid</option></select></div>
       <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Paid From / To Account</label><select name="account">{acc_opts_loan}</select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div><button class="btn bp" type="submit">✓ Save</button></form></div>
     <div class="grid" style="margin-bottom:14px">
@@ -948,7 +950,7 @@ def loan():
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="ct" style="margin:0">All Loan Records</div>
       <a href="/export/loans" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
-    </div><div class="tw"><table><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Amount</th><th>Added By</th><th></th></tr></thead>
+    </div><div class="tw"><table><thead><tr><th>Date</th><th>Person</th><th>Type</th><th>Amount</th><th>Added By</th></tr></thead>
     <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
     return layout("Loans","ln",body)
