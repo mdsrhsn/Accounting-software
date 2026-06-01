@@ -415,7 +415,7 @@ def dashboard():
         cash_html = f"""
         <div class="card">
           <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Cash position (current)</div>
-          <div style="font-size:20px;font-weight:700;margin-bottom:10px">{pk(total_cash)}</div>
+          <div style="font-size:20px;font-weight:700;margin-bottom:10px">{pk(real_cash)}</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <div style="flex:1;min-width:70px;background:#E1F5EE;padding:6px 8px;border-radius:6px">
               <div style="font-size:9px;color:#0F6E56;font-weight:600">CASH</div>
