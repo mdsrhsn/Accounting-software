@@ -1006,7 +1006,7 @@ def cashbank():
             ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
         total_bal = sum(balances.values())
-        # Real Cash in Hand — cutoff date approach (29 May 2026 onwards)
+     # Real Cash in Hand — cutoff date approach (29 May 2026 onwards)
     cutoff = "2026-05-29"
     rc_open = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(cutoff,)).fetchone()["v"] or 0
     rc_courier = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
@@ -1016,7 +1016,7 @@ def cashbank():
     rc_lt = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(cutoff,)).fetchone()["v"] or 0
     rc_lr = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(cutoff,)).fetchone()["v"] or 0
     real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)
-        conn.close()
+    conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
     for acc in ACC_LIST:
