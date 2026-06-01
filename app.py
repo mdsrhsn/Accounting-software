@@ -1046,9 +1046,8 @@ def cashbank():
     body = f"""{flashes()}
     <div class="grid">
     <div class="card" style="background:linear-gradient(135deg,#0F6E56 0%,#0F6E56 100%);color:#fff;margin-bottom:14px;padding:18px 24px">
-      <div style="font-size:12px;opacity:0.85;letter-spacing:0.5px">💰 REAL CASH IN HAND (After 29-May-2026 cutoff)</div>
+<div style="font-size:13px;opacity:0.85;letter-spacing:0.5px;margin-bottom:6px">Real Cash in Hand</div>
       <div style="font-size:32px;font-weight:700;margin-top:4px">{pk(real_cash)}</div>
-      <div style="font-size:11px;opacity:0.75;margin-top:4px">Opening Rs {pk(rc_open)} + Courier Rs {pk(rc_courier)} − Purchases Rs {pk(rc_pu)} − Expenses Rs {pk(rc_ex)} − Ad Spend Rs {pk(rc_ad)} + Loan Net Rs {pk(float(rc_lt)-float(rc_lr))}</div>
     </div>
       <div class="met"><div class="ml">Total Balance</div><div class="mv {'g' if total_bal>=0 else 'r'}">{pk(total_bal)}</div></div>
       {"".join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {"g" if balances[acc]>=0 else "r"}">{pk(balances[acc])}</div></div>' for acc in ACC_LIST
