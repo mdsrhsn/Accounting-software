@@ -2925,6 +2925,13 @@ def partial_payments():
                 </select>
             </div>
             <div class="fg">
+                <label>Paid From Account</label>
+                <select name="paid_from_account" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option value="">-- Select Account --</option>
+                    {"".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])}
+                </select>
+            </div>
+            <div class="fg">
                 <label>Date</label>
                 <input name="payment_date" type="date" id="pp-dt" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
             </div>
