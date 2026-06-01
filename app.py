@@ -2826,11 +2826,11 @@ def partial_payments():
         if purchase_id and amount > 0:
             # Payment record karo
             qry(conn, """INSERT INTO purchase_payments
-                (purchase_id, amount, payment_method, payment_date, notes, added_by)
-                VALUES (%s,%s,%s,%s,%s,%s)""",
+                (purchase_id, amount, payment_method, payment_date, notes, added_by, paid_from_account)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)""",
                 (purchase_id, amount, f.get("payment_method","Cash"),
                  f.get("payment_date") or today(),
-                 f.get("notes",""), session.get("naam","")))
+                 f.get("notes",""), session.get("naam",""), f.get("paid_from_account","")))
 
             # Purchase ki total_paid aur remaining update karo
             purchase = qry(conn, "SELECT * FROM purchases WHERE id=%s", (purchase_id,)).fetchone()
