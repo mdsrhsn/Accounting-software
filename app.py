@@ -354,6 +354,16 @@ def dashboard():
         out_ = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type='Money Out'",(acc,)).fetchone()["v"] or 0
         cash_bal[acc] = float(in_) - float(out_)
     total_cash = sum(cash_bal.values())
+    # Real Cash in Hand — same logic as cashbank page (cutoff 29 May 2026)
+    rc_cutoff = "2026-05-29"
+    rc_o = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_c = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_p = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE date>=%s AND status!='Unpaid'",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_e = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_a = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_lt2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
+    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)
 
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
