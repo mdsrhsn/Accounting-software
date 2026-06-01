@@ -359,13 +359,12 @@ def dashboard():
     rc_cutoff = "2026-05-29"
     rc_o = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_c = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
-    rc_p = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE date>=%s AND status!='Unpaid'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_e = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_a = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lt2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
+rc_p = float(qry(conn,"SELECT COALESCE((SELECT SUM(total_amount) FROM purchases WHERE date>=%s AND status='Paid' AND id NOT IN (SELECT purchase_id FROM purchase_payments)),0) + COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE payment_date>=%s),0) as v",(rc_cutoff,rc_cutoff)).fetchone()["v"] or 0)
     real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)
-
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
     else:
@@ -1012,8 +1011,7 @@ def cashbank():
             # Courier income — match by bank_holder + bank_name
             courier_in = qry(conn,"SELECT COALESCE(SUM(c.net_amount),0) as v FROM courier c JOIN courier_accounts ca ON ca.name = c.account_name WHERE %s = ca.bank_holder || ' — ' || ca.bank_name",(acc,)).fetchone()["v"] or 0
             # Outflows
-            pu_out = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE paid_from_account=%s AND status!='Unpaid'",(acc,)).fetchone()["v"] or 0
-            ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+pu_out = float(qry(conn,"SELECT COALESCE((SELECT SUM(total_amount) FROM purchases WHERE paid_from_account=%s AND status='Paid' AND id NOT IN (SELECT purchase_id FROM purchase_payments)),0) + COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE paid_from_account=%s),0) as v",(acc,acc)).fetchone()["v"] or 0)            ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
         total_bal = sum(balances.values())
@@ -1021,8 +1019,7 @@ def cashbank():
     cutoff = "2026-05-29"
     rc_open = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(cutoff,)).fetchone()["v"] or 0
     rc_courier = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
-    rc_pu = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE date>=%s AND status!='Unpaid'",(cutoff,)).fetchone()["v"] or 0
-    rc_ex = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
+rc_pu = float(qry(conn,"SELECT COALESCE((SELECT SUM(total_amount) FROM purchases WHERE date>=%s AND status='Paid' AND id NOT IN (SELECT purchase_id FROM purchase_payments)),0) + COALESCE((SELECT SUM(amount) FROM purchase_payments WHERE payment_date>=%s),0) as v",(cutoff,cutoff)).fetchone()["v"] or 0)    rc_ex = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
     rc_ad = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
     rc_lt = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(cutoff,)).fetchone()["v"] or 0
     rc_lr = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(cutoff,)).fetchone()["v"] or 0
@@ -2825,13 +2822,12 @@ def partial_payments():
         amount = float(f.get("amount", 0))
         if purchase_id and amount > 0:
             # Payment record karo
-            qry(conn, """INSERT INTO purchase_payments
-                (purchase_id, amount, payment_method, payment_date, notes, added_by)
-                VALUES (%s,%s,%s,%s,%s,%s)""",
+           qry(conn, """INSERT INTO purchase_payments
+                (purchase_id, amount, payment_method, payment_date, notes, added_by, paid_from_account)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)""",
                 (purchase_id, amount, f.get("payment_method","Cash"),
                  f.get("payment_date") or today(),
-                 f.get("notes",""), session.get("naam","")))
-
+                 f.get("notes",""), session.get("naam",""), f.get("paid_from_account","")))
             # Purchase ki total_paid aur remaining update karo
             purchase = qry(conn, "SELECT * FROM purchases WHERE id=%s", (purchase_id,)).fetchone()
             if purchase:
@@ -2925,6 +2921,13 @@ def partial_payments():
                 </select>
             </div>
             <div class="fg">
+                <label>Paid From Account</label>
+                <select name="paid_from_account" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option value="">-- Select Account --</option>
+                    {"".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])}
+                </select>
+            </div>
+            <div class="fg">
                 <label>Date</label>
                 <input name="payment_date" type="date" id="pp-dt" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
             </div>
@@ -3007,6 +3010,12 @@ def quick_pay(purchase_id):
             <div class="fg"><label>Method</label>
                 <select name="payment_method" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
                     <option>Cash</option><option>Bank Transfer</option><option>JazzCash</option><option>EasyPaisa</option>
+                </select>
+            </div>
+            <div class="fg"><label>Paid From Account</label>
+                <select name="paid_from_account" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option value="">-- Select Account --</option>
+                    {"".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])}
                 </select>
             </div>
             <div class="fg"><label>Date</label>
