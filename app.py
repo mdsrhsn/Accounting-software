@@ -220,7 +220,8 @@ def layout(title, page, body):
       <div class="sb-foot">
         <div style="font-weight:600;color:#94A3B8">{session.get('naam','')}</div>
         <div>{session.get('role','')}</div>
-        <a href="/logout">Logout</a>
+<a href="/change-password" style="color:#94A3B8">🔑 Change Password</a>        
+<a href="/logout">Logout</a>
       </div>
     </nav>
     <div class="main">
@@ -1245,7 +1246,39 @@ def del_user(i):
     conn.commit(); conn.close()
     session.setdefault('_flashes',[]).append(("info","User deleted"))
     return redirect("/users")
-
+@app.route("/change-password", methods=["GET","POST"])
+@login_req
+def change_password():
+    conn = get_db()
+    if request.method == "POST":
+        f = request.form
+        cur = f.get("current","")
+        new = f.get("new","")
+        confirm = f.get("confirm","")
+        if not new or len(new) < 4:
+            session.setdefault('_flashes',[]).append(("danger","New password must be at least 4 characters"))
+            return redirect("/change-password")
+        if new != confirm:
+            session.setdefault('_flashes',[]).append(("danger","New password and confirm do not match"))
+            return redirect("/change-password")
+        row = qry(conn,"SELECT password FROM users WHERE id=%s",(session.get("uid"),)).fetchone()
+        if not row or not check_password_hash(row["password"], cur):
+            session.setdefault('_flashes',[]).append(("danger","Current password is incorrect"))
+            return redirect("/change-password")
+        qry(conn,"UPDATE users SET password=%s WHERE id=%s",(generate_password_hash(new), session.get("uid")))
+        conn.commit(); conn.close()
+        session.setdefault('_flashes',[]).append(("success","Password changed successfully"))
+        return redirect("/change-password")
+    conn.close()
+    body = f"""{flashes()}
+    <div class="card" style="max-width:500px"><div class="ct">Change My Password</div>
+    <form method="POST" action="/change-password"><div style="display:grid;gap:12px">
+      <div class="fg"><label>Current Password</label><input name="current" type="password" required></div>
+      <div class="fg"><label>New Password</label><input name="new" type="password" required minlength="4"></div>
+      <div class="fg"><label>Confirm New Password</label><input name="confirm" type="password" required minlength="4"></div>
+      <button class="btn bp" type="submit" style="margin-top:8px">✓ Update Password</button>
+    </div></form></div>"""
+    return layout("Change Password","cp",body)
 # ── COURIER TRACKING ──────────────────────────────────────────────────────────
 @app.route("/tracking", methods=["GET","POST"])
 @login_req
