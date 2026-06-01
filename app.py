@@ -1013,9 +1013,10 @@ def cashbank():
             courier_in = qry(conn,"SELECT COALESCE(SUM(c.net_amount),0) as v FROM courier c JOIN courier_accounts ca ON ca.name = c.account_name WHERE %s = ca.bank_holder || ' — ' || ca.bank_name",(acc,)).fetchone()["v"] or 0
             # Outflows
             pu_out = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE paid_from_account=%s AND status!='Unpaid'",(acc,)).fetchone()["v"] or 0
+            pp_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
-            balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
+            balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)- float(pp_out)
         total_bal = sum(balances.values())
      # Real Cash in Hand — cutoff date approach (29 May 2026 onwards)
     cutoff = "2026-05-29"
