@@ -1006,6 +1006,16 @@ def cashbank():
             ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
         total_bal = sum(balances.values())
+        # Real Cash in Hand — cutoff date approach (29 May 2026 onwards)
+    cutoff = "2026-05-29"
+    rc_open = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(cutoff,)).fetchone()["v"] or 0
+    rc_courier = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
+    rc_pu = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE date>=%s AND status!='Unpaid'",(cutoff,)).fetchone()["v"] or 0
+    rc_ex = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
+    rc_ad = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
+    rc_lt = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(cutoff,)).fetchone()["v"] or 0
+    rc_lr = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(cutoff,)).fetchone()["v"] or 0
+    real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)
         conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
@@ -1035,6 +1045,11 @@ def cashbank():
     acc_opts = "".join([f"<option>{a}</option>" for a in ACC_LIST])
     body = f"""{flashes()}
     <div class="grid">
+    <div class="card" style="background:linear-gradient(135deg,#0F6E56 0%,#0F6E56 100%);color:#fff;margin-bottom:14px;padding:18px 24px">
+      <div style="font-size:12px;opacity:0.85;letter-spacing:0.5px">💰 REAL CASH IN HAND (After 29-May-2026 cutoff)</div>
+      <div style="font-size:32px;font-weight:700;margin-top:4px">{pk(real_cash)}</div>
+      <div style="font-size:11px;opacity:0.75;margin-top:4px">Opening Rs {pk(rc_open)} + Courier Rs {pk(rc_courier)} − Purchases Rs {pk(rc_pu)} − Expenses Rs {pk(rc_ex)} − Ad Spend Rs {pk(rc_ad)} + Loan Net Rs {pk(float(rc_lt)-float(rc_lr))}</div>
+    </div>
       <div class="met"><div class="ml">Total Balance</div><div class="mv {'g' if total_bal>=0 else 'r'}">{pk(total_bal)}</div></div>
       {"".join([f'<div class="met"><div class="ml">{acc}</div><div class="mv {"g" if balances[acc]>=0 else "r"}">{pk(balances[acc])}</div></div>' for acc in ACC_LIST
 ])}
