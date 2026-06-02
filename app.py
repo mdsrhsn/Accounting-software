@@ -364,7 +364,8 @@ def dashboard():
     rc_a = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lt2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
-    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)
+    rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
+    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)- float(rc_pp)
 
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
