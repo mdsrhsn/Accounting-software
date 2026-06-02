@@ -2996,6 +2996,7 @@ def quick_pay(purchase_id):
     paid    = float(purchase.get("total_paid") or 0)
     rem     = float(purchase.get("remaining") or total)
     pct     = int(paid/total*100) if total > 0 else 0
+    acc_opts_qp = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
 
     pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td><td><a href='/partial-payments/delpay/{p['id']}' class='btn bd' onclick='return confirm(&quot;Delete payment?&quot;)'>Del</a></td></tr>" for p in payments]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
     body = f"""{flashes()}
@@ -3026,6 +3027,11 @@ def quick_pay(purchase_id):
             <div class="fg"><label>Method</label>
                 <select name="payment_method" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
                     <option>Cash</option><option>Bank Transfer</option><option>JazzCash</option><option>EasyPaisa</option>
+                </select>
+            </div>
+            <div class="fg"><label>Paid From Account</label>
+                <select name="paid_from_account" style="width:100%;padding:7px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px">
+                    <option value="">-- Select Account --</option>{acc_opts_qp}
                 </select>
             </div>
             <div class="fg"><label>Date</label>
