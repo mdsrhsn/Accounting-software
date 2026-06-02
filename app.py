@@ -2987,8 +2987,8 @@ def quick_pay(purchase_id):
     rem     = float(purchase.get("remaining") or total)
     pct     = int(paid/total*100) if total > 0 else 0
 
-pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td><td><a href='/partial-payments/delpay/{p['id']}' class='btn bd' onclick='return confirm(&quot;Delete payment?&quot;)'>Del</a></td></tr>" for p in payments]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
-    body = f"""{flashes()}
+        pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td><td><a href='/partial-payments/delpay/{p['id']}' class='btn bd' onclick='return confirm(&quot;Delete payment?&quot;)'>Del</a></td></tr>" for p in payments]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
+        body = f"""{flashes()}
     <a href="/partial-payments" class="btn" style="margin-bottom:14px;display:inline-block">← Wapas</a>
 
     <div class="g2">
