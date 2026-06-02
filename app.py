@@ -2987,8 +2987,8 @@ def quick_pay(purchase_id):
     rem     = float(purchase.get("remaining") or total)
     pct     = int(paid/total*100) if total > 0 else 0
 
-        pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td><td><a href='/partial-payments/delpay/{p['id']}' class='btn bd' onclick='return confirm(&quot;Delete payment?&quot;)'>Del</a></td></tr>" for p in payments]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
-        body = f"""{flashes()}
+    pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td><td><a href='/partial-payments/delpay/{p['id']}' class='btn bd' onclick='return confirm(&quot;Delete payment?&quot;)'>Del</a></td></tr>" for p in payments]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
+    body = f"""{flashes()}
     <a href="/partial-payments" class="btn" style="margin-bottom:14px;display:inline-block">← Wapas</a>
 
     <div class="g2">
@@ -3027,7 +3027,7 @@ def quick_pay(purchase_id):
     <div class="card">
         <div class="ct">Payment History</div>
         <div class="tw"><table>
-            <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>By</th><th>Action</th></tr></thead>
             <tbody>{pay_rows}</tbody>
         </table></div>
     </div>
@@ -3036,7 +3036,8 @@ def quick_pay(purchase_id):
 
     return layout(f"Payment — {purchase['vendor']}", "pp", body)
 
-    @app.route("/partial-payments/delpay/<int:pid>")
+
+@app.route("/partial-payments/delpay/<int:pid>")
 @login_req
 @admin_req
 def del_payment(pid):
@@ -3047,7 +3048,6 @@ def del_payment(pid):
         return redirect("/partial-payments")
     purchase_id = pay["purchase_id"]
     qry(conn,"DELETE FROM purchase_payments WHERE id=%s",(pid,))
-    # Purchase ka hisaab dobara theek karo
     purchase = qry(conn,"SELECT * FROM purchases WHERE id=%s",(purchase_id,)).fetchone()
     if purchase:
         total_payments = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE purchase_id=%s",(purchase_id,)).fetchone()["v"] or 0
