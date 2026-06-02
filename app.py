@@ -2987,8 +2987,7 @@ def quick_pay(purchase_id):
     rem     = float(purchase.get("remaining") or total)
     pct     = int(paid/total*100) if total > 0 else 0
 
-    pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td></tr>" for p in payments]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
-
+pay_rows = "".join([f"<tr><td>{p['payment_date']}</td><td>{pk(p['amount'])}</td><td>{p['payment_method']}</td><td style='color:#9CA3AF;font-size:10px'>{p['added_by']}</td><td><a href='/partial-payments/delpay/{p['id']}' class='btn bd' onclick='return confirm(&quot;Delete payment?&quot;)'>Del</a></td></tr>" for p in payments]) or "<tr><td colspan='4' style='text-align:center;color:#9CA3AF'>Koi payment nahi</td></tr>"
     body = f"""{flashes()}
     <a href="/partial-payments" class="btn" style="margin-bottom:14px;display:inline-block">← Wapas</a>
 
@@ -3036,6 +3035,30 @@ def quick_pay(purchase_id):
     <script>document.getElementById('qp-dt').valueAsDate = new Date();</script>"""
 
     return layout(f"Payment — {purchase['vendor']}", "pp", body)
+
+    @app.route("/partial-payments/delpay/<int:pid>")
+@login_req
+@admin_req
+def del_payment(pid):
+    conn = get_db()
+    pay = qry(conn,"SELECT * FROM purchase_payments WHERE id=%s",(pid,)).fetchone()
+    if not pay:
+        conn.close()
+        return redirect("/partial-payments")
+    purchase_id = pay["purchase_id"]
+    qry(conn,"DELETE FROM purchase_payments WHERE id=%s",(pid,))
+    # Purchase ka hisaab dobara theek karo
+    purchase = qry(conn,"SELECT * FROM purchases WHERE id=%s",(purchase_id,)).fetchone()
+    if purchase:
+        total_payments = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE purchase_id=%s",(purchase_id,)).fetchone()["v"] or 0
+        total_amount = float(purchase["total_amount"] or 0)
+        remaining = total_amount - float(total_payments)
+        new_status = "Paid" if float(total_payments) >= total_amount else ("Partial" if float(total_payments) > 0 else "Unpaid")
+        qry(conn,"UPDATE purchases SET total_paid=%s, remaining=%s, status=%s WHERE id=%s",(float(total_payments), max(0, remaining), new_status, purchase_id))
+    conn.commit()
+    conn.close()
+    session.setdefault('_flashes',[]).append(("info","Payment deleted"))
+    return redirect(f"/partial-payments/pay/{purchase_id}")
 # ═══════════════════════════════════════════════════════════════════
 # SMART LEDGER v2 — BizHisaab
 # ═══════════════════════════════════════════════════════════════════
