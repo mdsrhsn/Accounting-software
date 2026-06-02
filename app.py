@@ -562,8 +562,16 @@ def purchases():
         total = float(f.get("total_amount") or 0)
         per_u = round(total/qty,2) if qty else 0
         st    = f.get("status","Paid")
-        qry(conn,"INSERT INTO purchases (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by,paid_from_account) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (f.get("date") or today(), f.get("vendor",""), f.get("product",""), qty, f.get("unit","Piece"), total, per_u, st, f.get("notes",""), session.get("naam",""), f.get("paid_from_account","")))
+        # Paid Now logic: Paid=pura, Unpaid=0, Partial=jo daala
+        if st == "Paid":
+            paid_now = total
+        elif st == "Unpaid":
+            paid_now = 0.0
+        else:
+            paid_now = float(f.get("paid_now") or 0)
+        remaining = total - paid_now
+        qry(conn,"INSERT INTO purchases (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by,paid_from_account,total_paid,remaining) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (f.get("date") or today(), f.get("vendor",""), f.get("product",""), qty, f.get("unit","Piece"), total, per_u, st, f.get("notes",""), session.get("naam",""), f.get("paid_from_account",""), paid_now, max(0, remaining)))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Purchase saved!"))
         return redirect("/purchases")
@@ -590,9 +598,10 @@ def purchases():
       <div class="fg"><label>Product Name</label><input name="product" placeholder="Product name" required></div>
       <div class="fg"><label>Quantity</label><input name="quantity" type="number" step="0.01" value="1" id="qty" oninput="calc()"></div>
       <div class="fg"><label>Unit</label><select name="unit" onchange="calc()"><option>Piece</option><option>Dozen</option><option>Box</option><option>Kg</option><option>Man</option><option>Other</option></select></div>
-      <div class="fg"><label>Total Amount Paid (PKR)</label><input name="total_amount" type="number" step="0.01" placeholder="0" id="tot" oninput="calc()"></div>
+      <div class="fg"><label>Total Bill Amount (PKR)</label><input name="total_amount" type="number" step="0.01" placeholder="0" id="tot" oninput="calc()"></div>
+      <div class="fg" id="paidnow-fg" style="display:none"><label>Paid Now (PKR)</label><input name="paid_now" type="number" step="0.01" placeholder="0" id="pn"></div>
       <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_purchase}</select></div>
-      <div class="fg"><label>Payment Status</label><select name="status"><option>Paid</option><option>Unpaid</option><option>Partial</option></select></div>
+      <div class="fg"><label>Payment Status</label><select name="status" id="stsel" onchange="togglePaid()"><option>Paid</option><option>Unpaid</option><option>Partial</option></select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
       <div class="fg"><label>Notes</label><input name="notes" placeholder="Optional"></div>
     </div>
@@ -613,7 +622,8 @@ def purchases():
     <script>document.getElementById('dt').valueAsDate=new Date();
     function calc(){{var q=parseFloat(document.getElementById('qty').value)||0;var t=parseFloat(document.getElementById('tot').value)||0;
     document.getElementById('pu').textContent='Rs '+(q>0?Math.round(t/q*100)/100:0).toLocaleString();
-    document.getElementById('ts').textContent='Rs '+Math.round(t).toLocaleString();}}</script>"""
+    document.getElementById('ts').textContent='Rs '+Math.round(t).toLocaleString();}}
+    function togglePaid(){{document.getElementById('paidnow-fg').style.display=(document.getElementById('stsel').value=='Partial')?'block':'none';}}</script>"""
     return layout("Purchases","pur",body)
 
 @app.route("/purchases/del/<int:i>")
