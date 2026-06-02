@@ -1027,7 +1027,8 @@ def cashbank():
     rc_ad = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(cutoff,)).fetchone()["v"] or 0
     rc_lt = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(cutoff,)).fetchone()["v"] or 0
     rc_lr = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(cutoff,)).fetchone()["v"] or 0
-    real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)
+    rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(cutoff,)).fetchone()["v"] or 0
+    real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)- float(rc_pp)
     conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
