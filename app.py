@@ -3555,10 +3555,11 @@ def expense_category_detail(cat_name):
                 <td>{r['paid_to'] or '—'}</td>
                 <td style="text-align:right;color:#DC2626;font-weight:600">Rs {fmt(r['amount'])}</td>
                 <td>{r['payment_method'] or '—'}</td>
-                <td style="color:#9CA3AF;font-size:11px">{r['added_by'] or ''}</td>
+                <td style="color:#9CA3AF;font-size:11px">{r['added_by'] or ''}</td><td><a href="/expenses/del/{r['id']}" class="btn bd" onclick="return confirm('Delete?')">Del</a></td>
+                <td><a href="/expenses/del/{r['id']}" class="btn bd" onclick="return confirm('Delete?')">Del</a></td>
             </tr>"""
     else:
-        trs = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#6B7280">Is category mein koi expense nahi</td></tr>'
+        trs = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#6B7280">Is category mein koi expense nahi</td></tr>'
 
     body = f"""
     <a href="/expense-summary" style="display:inline-block;background:white;padding:8px 16px;border-radius:8px;text-decoration:none;color:#374151;font-size:13px;font-weight:500;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,0.05)">← Wapis Expense Summary</a>
@@ -3579,7 +3580,7 @@ def expense_category_detail(cat_name):
     <div class="card">
         <div class="ct">Saari Entries ({summary['count']})</div>
         <div class="tw"><table>
-            <thead><tr><th>Date</th><th>Description</th><th>Paid To</th><th style="text-align:right">Amount</th><th>Method</th><th>Added By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Description</th><th>Paid To</th><th style="text-align:right">Amount</th><th>Method</th><th>Added By</th><th></th></tr></thead>
             <tbody>{trs}</tbody>
         </table></div>
     </div>
