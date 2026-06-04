@@ -3398,3 +3398,189 @@ def vendor_detail(vendor_name):
     """
 
     return layout(f"Vendor: {vendor_name}", "pur", body)
+    # ═══════════════════════════════════════════════════════════════════
+# EXPENSE SUMMARY + CATEGORY/PAID-TO DETAIL — app.py ke END mein paste karo
+# (if __name__ == '__main__': se pehle, ya kisi bhi route ke baad)
+# ⚠️ Sirf SELECT queries — koi data change nahi. Purana expense page safe.
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/expense-summary")
+@login_req
+@admin_req
+def expense_summary():
+    conn = get_db()
+    dates = _ledger_date_ranges()
+
+    today_data = qry(conn,"SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE date = %s",(dates["today"],)).fetchone()
+    yest_data  = qry(conn,"SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE date = %s",(dates["yesterday"],)).fetchone()
+    week_data  = qry(conn,"SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE date >= %s",(dates["week_start"],)).fetchone()
+    month_data = qry(conn,"SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS count FROM expenses WHERE date >= %s",(dates["month_start"],)).fetchone()
+
+    # Category-wise summary
+    cats = qry(conn,"""
+        SELECT category,
+               COUNT(*) AS cnt,
+               COALESCE(SUM(amount),0) AS total,
+               MAX(date) AS last_date
+        FROM expenses
+        WHERE category IS NOT NULL AND category != ''
+        GROUP BY category
+        ORDER BY total DESC
+    """).fetchall()
+
+    # Paid-To wise summary (kisko kitna diya)
+    paidto = qry(conn,"""
+        SELECT paid_to,
+               COUNT(*) AS cnt,
+               COALESCE(SUM(amount),0) AS total,
+               MAX(date) AS last_date
+        FROM expenses
+        WHERE paid_to IS NOT NULL AND paid_to != ''
+        GROUP BY paid_to
+        ORDER BY total DESC
+    """).fetchall()
+
+    conn.close()
+
+    def fmt(n):
+        try: return f"{int(float(n)):,}"
+        except: return "0"
+
+    def card(title, icon, data, color):
+        return f"""<div class="sum-card" style="border-left:4px solid {color}">
+            <div class="sc-label">{icon} {title}</div>
+            <div class="sc-amount" style="color:{color}">Rs {fmt(data['total'])}</div>
+            <div class="sc-meta"><span>📝 {data['count']} expenses</span></div>
+        </div>"""
+
+    cards_html = (
+        card("Aaj ke Expenses","📅",today_data,"#3B82F6") +
+        card("Kal ke Expenses","🕐",yest_data,"#8B5CF6") +
+        card("Is Hafte (Mon se)","📊",week_data,"#10B981") +
+        card("Is Mahine","📈",month_data,"#F59E0B")
+    )
+
+    cat_rows = ""
+    if cats:
+        for c in cats:
+            cat_rows += f"""<tr>
+                <td><strong>{c['category']}</strong></td>
+                <td style="text-align:center">{c['cnt']}</td>
+                <td style="text-align:right;color:#DC2626;font-weight:600">Rs {fmt(c['total'])}</td>
+                <td style="text-align:center;font-size:12px;color:#6B7280">{c['last_date'] or '—'}</td>
+                <td style="text-align:center"><a href="/expense-category/{c['category']}" class="btn-view">👁 Dekho</a></td>
+            </tr>"""
+    else:
+        cat_rows = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#6B7280">Abhi koi expense nahi hai</td></tr>'
+
+    paidto_rows = ""
+    if paidto:
+        for p in paidto:
+            paidto_rows += f"""<tr>
+                <td><strong>{p['paid_to']}</strong></td>
+                <td style="text-align:center">{p['cnt']}</td>
+                <td style="text-align:right;color:#DC2626;font-weight:600">Rs {fmt(p['total'])}</td>
+                <td style="text-align:center;font-size:12px;color:#6B7280">{p['last_date'] or '—'}</td>
+            </tr>"""
+    else:
+        paidto_rows = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#6B7280">Koi "Paid To" record nahi</td></tr>'
+
+    body = f"""
+    <style>
+        .summary-grid {{ display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px }}
+        .sum-card {{ background:white;padding:14px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08) }}
+        .sc-label {{ font-size:12px;color:#6B7280;margin-bottom:6px;font-weight:500 }}
+        .sc-amount {{ font-size:20px;font-weight:700;margin-bottom:4px }}
+        .sc-meta {{ font-size:11px;color:#4B5563 }}
+        .btn-view {{ background:#3B82F6;color:white;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:500 }}
+        .btn-view:hover {{ background:#2563EB }}
+        .top-nav {{ display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap }}
+        .nav-link {{ background:white;padding:8px 16px;border-radius:8px;text-decoration:none;color:#374151;font-size:13px;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.05) }}
+        .nav-link:hover {{ background:#F3F4F6 }}
+        .nav-link.active {{ background:#3B82F6;color:white }}
+    </style>
+
+    <div class="top-nav">
+        <a href="/expenses" class="nav-link">➕ Add Expense</a>
+        <a href="/expense-summary" class="nav-link active">📊 Expense Summary</a>
+    </div>
+
+    <div class="summary-grid">{cards_html}</div>
+
+    <div class="card">
+        <div class="ct">📂 Category-wise Expenses ({len(cats) if cats else 0} categories)</div>
+        <div class="tw"><table>
+            <thead><tr><th>Category</th><th style="text-align:center">Entries</th><th style="text-align:right">Total</th><th style="text-align:center">Last Date</th><th style="text-align:center">Action</th></tr></thead>
+            <tbody>{cat_rows}</tbody>
+        </table></div>
+    </div>
+
+    <div class="card">
+        <div class="ct">👤 Paid-To wise (kisko kitna diya)</div>
+        <div class="tw"><table>
+            <thead><tr><th>Paid To</th><th style="text-align:center">Times</th><th style="text-align:right">Total</th><th style="text-align:center">Last Date</th></tr></thead>
+            <tbody>{paidto_rows}</tbody>
+        </table></div>
+    </div>
+    """
+    return layout("Expense Summary","exp",body)
+
+
+@app.route("/expense-category/<path:cat_name>")
+@login_req
+@admin_req
+def expense_category_detail(cat_name):
+    conn = get_db()
+    rows = qry(conn,"SELECT * FROM expenses WHERE category=%s ORDER BY date DESC, id DESC",(cat_name,)).fetchall()
+    summary = qry(conn,"""
+        SELECT COUNT(*) AS count,
+               COALESCE(SUM(amount),0) AS total,
+               MIN(date) AS first_date,
+               MAX(date) AS last_date
+        FROM expenses WHERE category=%s
+    """,(cat_name,)).fetchone()
+    conn.close()
+
+    def fmt(n):
+        try: return f"{int(float(n)):,}"
+        except: return "0"
+
+    trs = ""
+    if rows:
+        for r in rows:
+            trs += f"""<tr>
+                <td>{r['date']}</td>
+                <td>{r['description'] or '—'}</td>
+                <td>{r['paid_to'] or '—'}</td>
+                <td style="text-align:right;color:#DC2626;font-weight:600">Rs {fmt(r['amount'])}</td>
+                <td>{r['payment_method'] or '—'}</td>
+                <td style="color:#9CA3AF;font-size:11px">{r['added_by'] or ''}</td>
+            </tr>"""
+    else:
+        trs = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#6B7280">Is category mein koi expense nahi</td></tr>'
+
+    body = f"""
+    <a href="/expense-summary" style="display:inline-block;background:white;padding:8px 16px;border-radius:8px;text-decoration:none;color:#374151;font-size:13px;font-weight:500;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,0.05)">← Wapis Expense Summary</a>
+
+    <div style="background:linear-gradient(135deg,#7C2D12 0%,#DC2626 100%);color:white;padding:22px 26px;border-radius:12px;margin-bottom:18px">
+        <div style="font-size:24px;font-weight:700;margin-bottom:6px">{cat_name}</div>
+        <div style="font-size:13px;opacity:0.95">
+            Pehla: {summary['first_date'] or '-'} | Aakhri: {summary['last_date'] or '-'} | Total Entries: {summary['count']}
+        </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px">
+        <div class="met"><div class="ml">Total Entries</div><div class="mv">{summary['count']}</div></div>
+        <div class="met"><div class="ml">Total Kharcha</div><div class="mv r">Rs {fmt(summary['total'])}</div></div>
+        <div class="met"><div class="ml">Last Date</div><div class="mv" style="font-size:14px">{summary['last_date'] or '—'}</div></div>
+    </div>
+
+    <div class="card">
+        <div class="ct">Saari Entries ({summary['count']})</div>
+        <div class="tw"><table>
+            <thead><tr><th>Date</th><th>Description</th><th>Paid To</th><th style="text-align:right">Amount</th><th>Method</th><th>Added By</th></tr></thead>
+            <tbody>{trs}</tbody>
+        </table></div>
+    </div>
+    """
+    return layout(f"Expense: {cat_name}","exp",body)
