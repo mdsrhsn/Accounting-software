@@ -212,6 +212,7 @@ def layout(title, page, body):
       <a href="/purchases-summary" class="{'on' if page=='pur' else ''}">📦 Purchases</a>
       <a href="/partial-payments" class="{'on' if page=='pp' else ''}">💳 Partial Payments</a>
       <a href="/expenses" class="{'on' if page=='exp' else ''}">💸 Expenses</a>
+<a href="/expense-summary" class="{'on' if page=='expsum' else ''}">📊 Expense Summary</a>
       <a href="/courier" class="{'on' if page=='co' else ''}">🚚 Courier</a>
       <a href="/tracking" class="{'on' if page=='trk' else ''}">📡 Courier Tracking</a>
       <a href="/returns" class="{'on' if page=='ret' else ''}">↩ Returns</a>
