@@ -3393,7 +3393,8 @@ def vendor_detail(vendor_name):
         for p in purchases:
             status = p.get("status") or "Unpaid"
             badge_bg = "#D1FAE5;color:#065F46" if status == "Paid" else ("#FEF3C7;color:#92400E" if status == "Partial" else "#FEE2E2;color:#991B1B")
-            rows += f"<tr><td>{p['date']}</td><td>{p.get('product') or '-'}</td><td style='text-align:center'>{p.get('quantity') or 0}</td><td style='text-align:center'>{p.get('unit') or '-'}</td><td style='text-align:right;color:#1E40AF'>Rs {fmt(p.get('per_unit_price') or 0)}</td><td style='text-align:right;font-weight:600'>Rs {fmt(p.get('total_amount') or 0)}</td><td style='text-align:center'><span style='background:{badge_bg};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600'>{status}</span></td><td style='font-size:11px;color:#6B7280'>{p.get('notes') or ''}</td></tr>"
+            del_td = ("<td style='text-align:center'><a href='/purchases/del/" + str(p['id']) + "' style='background:#DC2626;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;text-decoration:none' onclick='return confirm(\"Ye purchase delete kar dein?\")'>Delete</a></td>") if is_admin() else ""
+            rows += f"<tr>{del_td}<td>{p['date']}</td><td>{p.get('product') or '-'}</td><td style='text-align:center'>{p.get('quantity') or 0}</td><td style='text-align:center'>{p.get('unit') or '-'}</td><td style='text-align:right;color:#1E40AF'>Rs {fmt(p.get('per_unit_price') or 0)}</td><td style='text-align:right;font-weight:600'>Rs {fmt(p.get('total_amount') or 0)}</td><td style='text-align:center'><span style='background:{badge_bg};padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600'>{status}</span></td><td style='font-size:11px;color:#6B7280'>{p.get('notes') or ''}</td></tr>"
     else:
         rows = "<tr><td colspan='8' style='text-align:center;padding:20px;color:#6B7280'>Koi purchase nahi mili</td></tr>"
 
@@ -3424,6 +3425,7 @@ def vendor_detail(vendor_name):
             <table>
                 <thead>
                     <tr>
+                        {'<th style="text-align:center">Action</th>' if is_admin() else ''}
                         <th>Date</th>
                         <th>Product</th>
                         <th style="text-align:center">Qty</th>
