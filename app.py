@@ -626,9 +626,9 @@ def purchases():
     pur_rows_list = []
     for r in rows:
         amt_cols = f"<td class='b'><b>{hide_pk(r['per_unit_price'])}</b></td><td class='g'><b>{hide_pk(r['total_amount'])}</b></td>"
-        del_btn = ("<td><a href='/purchases/del/" + str(r["id"]) + "' class='btn bd' onclick='return confirm(\"Ye purchase delete kar dein?\")'>Del</a></td>") if is_admin() else ""
+        del_btn = ("<td><a href='/purchases/del/" + str(r["id"]) + "' style='background:#DC2626;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;text-decoration:none;white-space:nowrap' onclick='return confirm(\"Ye purchase delete kar dein?\")'>Delete</a></td>") if is_admin() else ""
         badge = "bg-g" if r['status']=='Paid' else "bg-r" if r['status']=='Unpaid' else "bg-w"
-        pur_rows_list.append(f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>{amt_cols}<td><span class='badge {badge}'>{r['status']}</span></td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>{del_btn}</tr>")
+        pur_rows_list.append(f"<tr>{del_btn}<td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>{amt_cols}<td><span class='badge {badge}'>{r['status']}</span></td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td></tr>")
     trs = "".join(pur_rows_list) or f"<tr><td colspan='{10 if is_admin() else 7}' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
 
     body = f"""{flashes()}
@@ -654,7 +654,7 @@ def purchases():
       <div class="ct" style="margin:0">All Purchases</div>
       <a href="/export/purchases" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>
     </div><div class="tw"><table>
-      <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th>{amt_headers}<th>Status</th><th>Added By</th>{"<th></th>" if is_admin() else ""}</tr></thead>
+      <thead><tr>{"<th style='width:60px'>Action</th>" if is_admin() else ""}<th>Date</th><th>Vendor</th><th>Product</th><th>Qty</th><th>Unit</th>{amt_headers}<th>Status</th><th>Added By</th></tr></thead>
       <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();
     function calc(){{var q=parseFloat(document.getElementById('qty').value)||0;var t=parseFloat(document.getElementById('tot').value)||0;
