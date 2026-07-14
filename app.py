@@ -3189,8 +3189,8 @@ def purchases_summary():
         SELECT vendor,
                COUNT(*)                       AS purchase_count,
                COALESCE(SUM(total_amount),0)  AS total_amount,
-               COALESCE(SUM(CASE WHEN status='Paid' THEN total_amount ELSE 0 END),0) AS paid_amount,
-               COALESCE(SUM(CASE WHEN status!='Paid' THEN total_amount ELSE 0 END),0) AS unpaid_amount,
+               COALESCE(SUM(COALESCE(total_paid,0)),0) AS paid_amount,
+               COALESCE(SUM(total_amount - COALESCE(total_paid,0)),0) AS unpaid_amount,
                MAX(date)                       AS last_purchase
         FROM purchases
         WHERE vendor IS NOT NULL AND vendor != ''
@@ -3373,8 +3373,8 @@ def vendor_detail(vendor_name):
     summary = qry(conn, """
         SELECT COUNT(*)                        AS count,
                COALESCE(SUM(total_amount),0)   AS total,
-               COALESCE(SUM(CASE WHEN status='Paid' THEN total_amount ELSE 0 END),0) AS paid,
-               COALESCE(SUM(CASE WHEN status!='Paid' THEN total_amount ELSE 0 END),0) AS unpaid,
+               COALESCE(SUM(COALESCE(total_paid,0)),0) AS paid,
+               COALESCE(SUM(total_amount - COALESCE(total_paid,0)),0) AS unpaid,
                MIN(date)                        AS first_purchase,
                MAX(date)                        AS last_purchase
         FROM purchases WHERE vendor = %s
