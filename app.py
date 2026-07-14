@@ -626,7 +626,7 @@ def purchases():
     pur_rows_list = []
     for r in rows:
         amt_cols = f"<td class='b'><b>{hide_pk(r['per_unit_price'])}</b></td><td class='g'><b>{hide_pk(r['total_amount'])}</b></td>"
-        del_btn = ("<td><a href='/purchases/del/" + str(r["id"]) + "' class='btn bd' onclick='return confirm(chr(39)+chr(68)+chr(101)+chr(108)+chr(101)+chr(116)+chr(101)+chr(63)+chr(39))'>Del</a></td>") if is_admin() else ""
+        del_btn = ("<td><a href='/purchases/del/" + str(r["id"]) + "' class='btn bd' onclick='return confirm(\"Ye purchase delete kar dein?\")'>Del</a></td>") if is_admin() else ""
         badge = "bg-g" if r['status']=='Paid' else "bg-r" if r['status']=='Unpaid' else "bg-w"
         pur_rows_list.append(f"<tr><td>{r['date']}</td><td>{r['vendor']}</td><td>{r['product']}</td><td>{int(r['quantity'] or 0)}</td><td>{r['unit']}</td>{amt_cols}<td><span class='badge {badge}'>{r['status']}</span></td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>{del_btn}</tr>")
     trs = "".join(pur_rows_list) or f"<tr><td colspan='{10 if is_admin() else 7}' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
@@ -668,9 +668,11 @@ def purchases():
 @admin_req
 def del_purchase(i):
     conn = get_db()
+    # Pehle is purchase ki saari partial payments delete karo (orphan records na rahein)
+    qry(conn,"DELETE FROM purchase_payments WHERE purchase_id=%s",(i,))
     qry(conn,"DELETE FROM purchases WHERE id=%s",(i,))
     conn.commit(); conn.close()
-    session.setdefault('_flashes',[]).append(("info","Deleted"))
+    session.setdefault('_flashes',[]).append(("info","Purchase aur uski saari payments delete ho gayin"))
     return redirect("/purchases")
 
 # ── EXPENSES ──────────────────────────────────────────────────────────────────
@@ -1263,7 +1265,7 @@ def users():
     for r in rows:
         badge = "bg-b" if r['role']=='admin' else "bg-g"
         if r['id'] != session.get('uid'):
-            del_btn = '<a href="/users/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(chr(39)+chr(68)+chr(101)+chr(108)+chr(101)+chr(116)+chr(101)+chr(63)+chr(39))">Del</a>'
+            del_btn = '<a href="/users/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\"Ye purchase delete kar dein?\")">Del</a>'
         else:
             del_btn = '<span style="font-size:10px;color:#9CA3AF">You</span>'
         trs_list.append(f"<tr><td>{r['id']}</td><td>{r['naam'] or chr(8212)}</td><td>{r['username']}</td><td><span class='badge {badge}'>{r['role']}</span></td><td>{del_btn}</td></tr>")
