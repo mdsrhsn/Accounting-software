@@ -392,7 +392,7 @@ def dashboard():
     rc_lt2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
-    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)- float(rc_pp)
+    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)
 
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
@@ -597,8 +597,14 @@ def purchases():
         else:
             paid_now = float(f.get("paid_now") or 0)
         remaining = total - paid_now
-        qry(conn,"INSERT INTO purchases (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by,paid_from_account,total_paid,remaining) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (f.get("date") or today(), f.get("vendor",""), f.get("product",""), qty, f.get("unit","Piece"), total, per_u, st, f.get("notes",""), session.get("naam",""), f.get("paid_from_account",""), paid_now, max(0, remaining)))
+        _pdate = f.get("date") or today()
+        _pfa   = f.get("paid_from_account","")
+        _newp = qry(conn,"INSERT INTO purchases (date,vendor,product,quantity,unit,total_amount,per_unit_price,status,notes,added_by,paid_from_account,total_paid,remaining) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (_pdate, f.get("vendor",""), f.get("product",""), qty, f.get("unit","Piece"), total, per_u, st, f.get("notes",""), session.get("naam",""), _pfa, paid_now, max(0, remaining))).fetchone()
+        # Shuru mein jitna pay kiya, use bhi pehli qist ke taur pe payments table mein daalo (taake kabhi gum na ho)
+        if paid_now > 0 and _newp:
+            qry(conn,"INSERT INTO purchase_payments (purchase_id, amount, payment_method, payment_date, notes, added_by, paid_from_account) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (_newp["id"], paid_now, "Cash", _pdate, "Initial payment (purchase ke waqt)", session.get("naam",""), _pfa))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success","Purchase saved!"))
         return redirect("/purchases")
@@ -1058,7 +1064,7 @@ def cashbank():
             pp_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
             ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
-            balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)- float(pp_out)
+            balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
         total_bal = sum(balances.values())
      # Real Cash in Hand — cutoff date approach (29 May 2026 onwards)
     cutoff = REAL_CASH_CUTOFF
@@ -1070,7 +1076,7 @@ def cashbank():
     rc_lt = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(cutoff,)).fetchone()["v"] or 0
     rc_lr = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(cutoff,)).fetchone()["v"] or 0
     rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(cutoff,)).fetchone()["v"] or 0
-    real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)- float(rc_pp)
+    real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)
     conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
@@ -2670,7 +2676,7 @@ def cashflow():
     total_in   = cod_in + loan_in + invest_in
 
     # ── CASH OUT ──────────────────────────────────────────────────
-    purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE 1=1 {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     expenses   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w}", p2).fetchone()["v"] or 0)
     adspend    = float(qry(conn, f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w}", p2).fetchone()["v"] or 0)
     loan_out   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
