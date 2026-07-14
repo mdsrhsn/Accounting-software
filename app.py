@@ -386,14 +386,13 @@ def dashboard():
     rc_cutoff = REAL_CASH_CUTOFF
     rc_o = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_c = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
-    rc_p = qry(conn,"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
+    rc_p = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE date>=%s AND status!='Unpaid'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_e = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_a = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lt2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
-    pu_paid = qry(conn,"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases").fetchone()["v"] or 0
-    real_cash = float(inv) + float(co_all) + float(ll) - float(pu_paid) - float(ex_all) - float(ad_all) - float(lw)
+    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)- float(rc_pp)
 
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
@@ -2671,7 +2670,7 @@ def cashflow():
     total_in   = cod_in + loan_in + invest_in
 
     # ── CASH OUT ──────────────────────────────────────────────────
-    purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE 1=1 {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     expenses   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w}", p2).fetchone()["v"] or 0)
     adspend    = float(qry(conn, f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w}", p2).fetchone()["v"] or 0)
     loan_out   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
