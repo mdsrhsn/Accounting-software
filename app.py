@@ -799,8 +799,13 @@ def courier():
         COUNT(*) as cnt,
         COALESCE(SUM(total_cod),0) as total_cod,
         COALESCE(SUM(charges),0) as charges,
-        COALESCE(SUM(net_amount),0) as net
+        COALESCE(SUM(net_amount),0) as net,
+        MAX(date::text) as last_date
         FROM courier GROUP BY account_name ORDER BY net DESC""").fetchall()
+    monthly = qry(conn,"""SELECT SUBSTRING(date::text,1,7) as ym,
+        COUNT(*) as cnt,
+        COALESCE(SUM(net_amount),0) as net
+        FROM courier GROUP BY ym ORDER BY ym DESC LIMIT 8""").fetchall()
     conn.close()
 
     # Account filter buttons
@@ -817,9 +822,21 @@ def courier():
             <div class="ml">{s['account_name']}</div>
             <div class="mv g">{pk(s['net'])}</div>
             <div style="font-size:10px;color:#6B7280;margin-top:2px">{bank_info}</div>
-            <div style="font-size:10px;color:#9CA3AF">{s['cnt']} records</div>
+            <div style="font-size:10px;color:#9CA3AF">{s['cnt']} records · aakhri: {s.get('last_date') or '—'}</div>
         </div>"""
 
+    import datetime as _dt
+    _cur_ym = _dt.date.today().strftime("%Y-%m")
+    _mn = {"01":"Jan","02":"Feb","03":"Mar","04":"Apr","05":"May","06":"Jun","07":"Jul","08":"Aug","09":"Sep","10":"Oct","11":"Nov","12":"Dec"}
+    month_rows = ""
+    this_month_net = 0
+    for m in monthly:
+        ym = m["ym"] or ""
+        if ym == _cur_ym:
+            this_month_net = float(m["net"] or 0)
+        label = (_mn.get(ym[5:7],"") + " " + ym[0:4]) if len(ym)==7 else ym
+        hl = "background:#EFF6FF;font-weight:600" if ym==_cur_ym else ""
+        month_rows += f"<tr style='{hl}'><td>{label}</td><td style='text-align:center'>{int(m['cnt'])}</td><td style='text-align:right;color:#065F46;font-weight:600'>{pk(m['net'])}</td></tr>"
     acc_opts = "".join([f"<option value='{a['name']}'>{a['name']} ({a['courier']} → {a['bank_holder']} {a['bank_name']})</option>" for a in accounts])
 
     trs = "".join([f"""<tr>
@@ -841,6 +858,14 @@ def courier():
     <div style="margin-bottom:6px;font-size:11px;font-weight:600;color:#6B7280">Account-wise Summary (click to filter)</div>
     <div class="grid" style="margin-bottom:14px">{acc_cards}</div>
 
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:14px">
+      <div class="met"><div class="ml">Is Mahine Aaya ({_mn.get(_cur_ym[5:7],'')} {_cur_ym[0:4]})</div><div class="mv g">{pk(this_month_net)}</div><div style="font-size:10px;color:#9CA3AF">bank mein received (net)</div></div>
+      <div class="card" style="margin:0"><div class="ct" style="font-size:12px">Mahina-wise Summary</div>
+        <table style="width:100%;font-size:12px"><thead><tr><th style='text-align:left'>Mahina</th><th style='text-align:center'>Payments</th><th style='text-align:right'>Aaya (Net)</th></tr></thead>
+        <tbody>{month_rows}</tbody></table>
+      </div>
+    </div>
+
     <div class="card"><div class="ct">Add Courier Payment</div>
     <form method="POST" action="/courier">
     <div class="fgrid">
@@ -854,8 +879,8 @@ def courier():
         <input id="bank_info" readonly style="background:#F8FAFC;color:#6B7280" placeholder="Auto-filled from account">
       </div>
       <div class="fg"><label>Payment Type</label><select name="type"><option>COD</option><option>Online/Prepaid</option><option>Settlement</option></select></div>
-      <div class="fg"><label>Total COD Amount (PKR)</label><input name="total_cod" type="number" step="0.01" placeholder="0" id="cod" oninput="calc()"></div>
-      <div class="fg"><label>Courier Charges (PKR)</label><input name="charges" type="number" step="0.01" placeholder="0" id="chg" oninput="calc()"></div>
+      <div class="fg"><label>Bank Mein Aaya — Amount (PKR)</label><input name="total_cod" type="number" step="0.01" placeholder="0" id="cod" oninput="calc()"></div>
+      <div class="fg"><label>Courier Charges (agar alag kate)</label><input name="charges" type="number" step="0.01" placeholder="0" id="chg" oninput="calc()"></div>
       <div class="fg"><label>No. of Parcels</label><input name="parcels" type="number" placeholder="0"></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
       <div class="fg"><label>Reference / Sheet No.</label><input name="reference" placeholder="Settlement sheet no."></div>
