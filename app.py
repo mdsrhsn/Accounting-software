@@ -548,6 +548,10 @@ def dashboard():
               <div style="font-size:20px;margin-bottom:4px">💸</div>
               <div style="font-size:11px;color:#501313;font-weight:600">Add Expense</div>
             </a>
+            <a href="/export/all" style="background:#F1EFE8;padding:14px 8px;border-radius:10px;text-align:center;text-decoration:none">
+              <div style="font-size:20px;margin-bottom:4px">⬇</div>
+              <div style="font-size:11px;color:#2C2C2A;font-weight:600">Full Backup (Excel)</div>
+            </a>
             <a href="/courier" style="background:#E1F5EE;padding:14px 8px;border-radius:10px;text-align:center;text-decoration:none">
               <div style="font-size:20px;margin-bottom:4px">🚚</div>
               <div style="font-size:11px;color:#04342C;font-weight:600">Courier Pay</div>
@@ -2147,6 +2151,20 @@ def exp_pnl():
     resp.headers["Content-Disposition"] = f"attachment; filename={fname}"
     return resp
 
+@app.route("/export/partial-payments")
+def export_partial_payments():
+    if not is_admin(): return redirect("/")
+    conn = get_db()
+    rows = qry(conn,"""SELECT pp.payment_date, p.vendor, p.product, pp.amount, pp.payment_method, pp.paid_from_account, pp.notes, pp.added_by
+        FROM purchase_payments pp LEFT JOIN purchases p ON p.id = pp.purchase_id
+        ORDER BY pp.payment_date DESC""").fetchall()
+    conn.close()
+    out = "Date,Vendor,Product,Amount,Method,Paid From,Notes,Added By\n"
+    for r in rows:
+        out += f"{r.get('payment_date') or ''},{(r.get('vendor') or '').replace(',',' ')},{(r.get('product') or '').replace(',',' ')},{r.get('amount') or 0},{r.get('payment_method') or ''},{(r.get('paid_from_account') or '').replace(',',' ')},{(r.get('notes') or '').replace(',',' ')},{r.get('added_by') or ''}\n"
+    from flask import Response
+    return Response(out, mimetype="text/csv", headers={"Content-Disposition":f"attachment;filename=partial_payments_{today().replace('-','')}.csv"})
+
 @app.route("/export/all")
 @login_req
 @admin_req
@@ -3029,7 +3047,7 @@ def partial_payments():
 
     <!-- PARTIAL TABLE -->
     <div class="card">
-        <div class="ct">Partial Payments — Baaki Hai</div>
+        <div class="ct" style="display:flex;justify-content:space-between;align-items:center">Partial Payments — Baaki Hai <a href="/export/partial-payments" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a></div>
         <div class="tw"><table>
             <thead><tr><th>Date</th><th>Vendor</th><th>Product</th><th>Total</th><th>Paid</th><th>Baaki</th><th>Status</th><th></th></tr></thead>
             <tbody>{partial_trs}</tbody>
