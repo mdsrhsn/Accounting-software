@@ -374,7 +374,8 @@ def dashboard():
     pu_all = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0
     ex_all = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
     ad_all = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
-    networth = float(inv) + (float(co_all) - float(pu_all) - float(ex_all) - float(ad_all)) - (float(ll) - float(lw))
+    pu_paid_nw = qry(conn,"SELECT COALESCE(SUM(COALESCE(total_paid,0)),0) as v FROM purchases").fetchone()["v"] or 0
+    networth = float(inv) + float(co_all) + float(ll) - float(pu_paid_nw) - float(ex_all) - float(ad_all) - float(lw) - (float(ll) - float(lw))
 
     cash_bal = {}
     for acc in ACCOUNTS:
@@ -392,7 +393,8 @@ def dashboard():
     rc_lt2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
-    real_cash = float(rc_o) + float(rc_c) - float(rc_p) - float(rc_e) - float(rc_a) + float(rc_lt2) - float(rc_lr2)
+    pu_paid_all = qry(conn,"SELECT COALESCE(SUM(COALESCE(total_paid,0)),0) as v FROM purchases").fetchone()["v"] or 0
+    real_cash = float(inv) + float(co_all) + float(ll) - float(pu_paid_all) - float(ex_all) - float(ad_all) - float(lw)
 
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
@@ -485,7 +487,7 @@ def dashboard():
               <div style="font-size:11px;color:#5DCAA5;margin-top:4px">Showing: {period_label}</div>
             </div>
             <div style="text-align:right">
-              <div style="font-size:11px;opacity:0.7">Estimated Net Worth (All time)</div>
+              <div style="font-size:11px;opacity:0.7">Cash Position − Loan Baaki (stock alag)</div>
               <div style="font-size:22px;font-weight:600">{pk(networth)}</div>
             </div>
           </div>
@@ -510,9 +512,9 @@ def dashboard():
           </div>
           <div style="background:#0F6E56;color:white;padding:16px;border-radius:12px">
             <div style="font-size:22px;margin-bottom:8px">📈</div>
-            <div style="font-size:11px;opacity:0.85;margin-bottom:2px">Net Profit/Loss</div>
+            <div style="font-size:11px;opacity:0.85;margin-bottom:2px">Cash Net (is period)</div>
             <div style="font-size:18px;font-weight:700">{fmt_lakh(net)}</div>
-            <div style="font-size:10px;opacity:0.75;margin-top:4px">{'Profit' if net>=0 else 'Loss'}</div>
+            <div style="font-size:10px;opacity:0.75;margin-top:4px">Aaya − Gaya (stock shamil nahi)</div>
           </div>
           <div style="background:#A32D2D;color:white;padding:16px;border-radius:12px">
             <div style="font-size:22px;margin-bottom:8px">📦</div>
@@ -3366,7 +3368,7 @@ def vendor_detail(vendor_name):
 
     purchases = qry(conn, """
         SELECT * FROM purchases
-        WHERE vendor = %s
+        WHERE LOWER(TRIM(vendor)) = LOWER(TRIM(%s))
         ORDER BY date DESC, id DESC
     """, (vendor_name,)).fetchall()
 
@@ -3377,7 +3379,7 @@ def vendor_detail(vendor_name):
                COALESCE(SUM(total_amount - COALESCE(total_paid,0)),0) AS unpaid,
                MIN(date)                        AS first_purchase,
                MAX(date)                        AS last_purchase
-        FROM purchases WHERE vendor = %s
+        FROM purchases WHERE LOWER(TRIM(vendor)) = LOWER(TRIM(%s))
     """, (vendor_name,)).fetchone()
 
     conn.close()
