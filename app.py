@@ -223,6 +223,7 @@ def layout(title, page, body):
         <a href="/cashbank" class="{'on' if page=='cb' else ''}">💵 Cash & Bank</a>
         <a href="/investment" class="{'on' if page=='inv' else ''}">💰 Investment</a>
         <a href="/loan" class="{'on' if page=='ln' else ''}">🏦 Loans</a>
+        <a href="/rename" class="{'on' if page=='rn' else ''}">✏️ Rename</a>
         <a href="/pnl" class="{'on' if page=='pnl' else ''}">📊 P&L Report</a>
         <a href="/import" class="{'on' if page=='imp' else ''}">⬆ Import Data</a>
         <a href="/users" class="{'on' if page=='usr' else ''}">👥 Users</a>
@@ -394,7 +395,9 @@ def dashboard():
     rc_lr2 = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(rc_cutoff,)).fetchone()["v"] or 0
     rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(rc_cutoff,)).fetchone()["v"] or 0
     pu_paid_all = qry(conn,"SELECT COALESCE(SUM(COALESCE(total_paid,0)),0) as v FROM purchases").fetchone()["v"] or 0
-    real_cash = float(inv) + float(co_all) + float(ll) - float(pu_paid_all) - float(ex_all) - float(ad_all) - float(lw)
+    ld_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Diya'").fetchone()["v"] or 0
+    lwm_all = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Wapsi Mili'").fetchone()["v"] or 0
+    real_cash = float(inv) + float(co_all) + float(ll) - float(pu_paid_all) - float(ex_all) - float(ad_all) - float(lw) - float(ld_all) + float(lwm_all)
 
     if d_from and d_to:
         top_vendor = qry(conn,"SELECT vendor, COUNT(*) as cnt, SUM(total_amount) as t FROM purchases WHERE date>=%s AND date<=%s GROUP BY vendor ORDER BY t DESC LIMIT 1",p2).fetchone()
@@ -1023,13 +1026,15 @@ def loan():
     rows  = qry(conn,"SELECT * FROM loans ORDER BY created_at DESC").fetchall()
     taken = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     repaid= qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
+    given = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Diya'").fetchone()["v"] or 0
+    gotback = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Wapsi Mili'").fetchone()["v"] or 0
     conn.close()
-    trs = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td><span class='badge {'bg-r' if r['type']=='Loan Taken' else 'bg-g'}'>{r['type']}</span></td><td style='font-weight:600;color:{'#DC2626' if r['type']=='Loan Taken' else '#16A34A'}'>{pk(r['amount'])}</td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td></tr>" for r in rows]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+    trs = "".join([f"<tr><td>{r['date']}</td><td>{r['person']}</td><td><span class='badge {'bg-r' if r['type'] in ('Loan Taken','Loan Diya') else 'bg-g'}'>{r['type']}</span></td><td style='font-weight:600;color:{'#DC2626' if r['type'] in ('Loan Taken','Loan Diya') else '#16A34A'}'>{pk(r['amount'])}</td><td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td></tr>" for r in rows]) or "<tr><td colspan='5' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
     body = f"""{flashes()}
     <div class="card"><div class="ct">Add Loan Record</div>
     <form method="POST" action="/loan"><div class="fgrid">
       <div class="fg"><label>Person Name</label><input name="person" placeholder="e.g. Brother, Hamza" required></div>
-      <div class="fg"><label>Type</label><select name="type"><option>Loan Taken</option><option>Loan Repaid</option></select></div>
+      <div class="fg"><label>Type</label><select name="type"><option>Loan Taken</option><option>Loan Repaid</option><option>Loan Diya</option><option>Loan Wapsi Mili</option></select></div>
       <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
       <div class="fg"><label>Paid From / To Account</label><select name="account">{acc_opts_loan}</select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
@@ -1037,7 +1042,9 @@ def loan():
     <div class="grid" style="margin-bottom:14px">
       <div class="met"><div class="ml">Loan Taken</div><div class="mv r">{pk(taken)}</div></div>
       <div class="met"><div class="ml">Loan Repaid</div><div class="mv g">{pk(repaid)}</div></div>
-      <div class="met"><div class="ml">Outstanding</div><div class="mv w">{pk(float(taken)-float(repaid))}</div></div>
+      <div class="met"><div class="ml">Outstanding (dena)</div><div class="mv w">{pk(float(taken)-float(repaid))}</div></div>
+      <div class="met"><div class="ml">Loan Diya</div><div class="mv r">{pk(given)}</div></div>
+      <div class="met"><div class="ml">Loan Diya Baaki (lena hai)</div><div class="mv w">{pk(float(given)-float(gotback))}</div></div>
     </div>
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="ct" style="margin:0">All Loan Records</div>
@@ -1116,7 +1123,9 @@ def cashbank():
     rc_ad_all  = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
     rc_lt_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     rc_lr_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
-    real_cash = float(rc_inv_all) + float(rc_co_all) + float(rc_lt_all) - float(rc_pu_all) - float(rc_ex_all) - float(rc_ad_all) - float(rc_lr_all)
+    rc_ld_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Diya'").fetchone()["v"] or 0
+    rc_lwm_all = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Wapsi Mili'").fetchone()["v"] or 0
+    real_cash = float(rc_inv_all) + float(rc_co_all) + float(rc_lt_all) - float(rc_pu_all) - float(rc_ex_all) - float(rc_ad_all) - float(rc_lr_all) - float(rc_ld_all) + float(rc_lwm_all)
     conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
@@ -2158,6 +2167,52 @@ def exp_pnl():
     resp.headers["Content-Disposition"] = f"attachment; filename={fname}"
     return resp
 
+@app.route("/rename", methods=["GET","POST"])
+@login_req
+@admin_req
+def rename_page():
+    conn = get_db()
+    msg = ""
+    if request.method == "POST":
+        f = request.form
+        kind = f.get("kind",""); old_n = (f.get("old_name") or "").strip(); new_n = (f.get("new_name") or "").strip()
+        if old_n and new_n and old_n != new_n:
+            if kind == "vendor":
+                qry(conn,"UPDATE purchases SET vendor=%s WHERE vendor=%s",(new_n,old_n))
+            elif kind == "category":
+                qry(conn,"UPDATE expenses SET category=%s WHERE category=%s",(new_n,old_n))
+            elif kind == "courier_account":
+                qry(conn,"UPDATE courier_accounts SET name=%s WHERE name=%s",(new_n,old_n))
+                qry(conn,"UPDATE courier SET account_name=%s WHERE account_name=%s",(new_n,old_n))
+            conn.commit()
+            session.setdefault('_flashes',[]).append(("success",f"Rename ho gaya: '{old_n}' -> '{new_n}'"))
+            conn.close()
+            return redirect("/rename")
+    vendors = qry(conn,"SELECT DISTINCT vendor FROM purchases WHERE vendor IS NOT NULL AND vendor != '' ORDER BY vendor").fetchall()
+    cats    = qry(conn,"SELECT DISTINCT category FROM expenses WHERE category IS NOT NULL AND category != '' ORDER BY category").fetchall()
+    caccs   = qry(conn,"SELECT name FROM courier_accounts WHERE active=TRUE ORDER BY name").fetchall()
+    conn.close()
+    v_opts = "".join([f"<option>{v['vendor']}</option>" for v in vendors])
+    c_opts = "".join([f"<option>{c['category']}</option>" for c in cats])
+    a_opts = "".join([f"<option>{a['name']}</option>" for a in caccs])
+    def frm(kind,label,opts):
+        return f"""<div class="card"><div class="ct">{label} ka naam badlo</div>
+        <form method="POST" action="/rename">
+        <input type="hidden" name="kind" value="{kind}">
+        <div class="fgrid">
+          <div class="fg"><label>Purana naam</label><select name="old_name">{opts}</select></div>
+          <div class="fg"><label>Naya naam</label><input name="new_name" placeholder="Naya naam likho" required></div>
+        </div>
+        <button class="btn bp" type="submit" onclick="return confirm('Saari purani entries naye naam pe chali jayengi. Pakka?')">Rename Karo</button>
+        </form></div>"""
+    body = flashes() + f"""
+    <div style="font-size:12px;color:#6B7280;margin-bottom:12px">Naam badalne se us head ki <b>saari purani entries</b> naye naam ke neeche jud jayengi. Hisaab pe koi asar nahi parta.</div>
+    {frm("vendor","Vendor",v_opts)}
+    {frm("category","Expense Category",c_opts)}
+    {frm("courier_account","Courier Account",a_opts)}
+    """
+    return layout("Rename","rn",body)
+
 @app.route("/export/partial-payments")
 def export_partial_payments():
     if not is_admin(): return redirect("/")
@@ -2727,15 +2782,17 @@ def cashflow():
     loan_in    = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     invest_in  = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM investment {w}", p2).fetchone()["v"] or 0)
     cb_in      = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type IN ('Money In','Opening Balance') {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
-    total_in   = cod_in + loan_in + invest_in
+    total_in   = cod_in + loan_in + invest_in + loan_gotback
 
     # ── CASH OUT ──────────────────────────────────────────────────
     purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE 1=1 {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     expenses   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM expenses {w}", p2).fetchone()["v"] or 0)
     adspend    = float(qry(conn, f"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend {w}", p2).fetchone()["v"] or 0)
     loan_out   = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    loan_given = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Diya' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    loan_gotback = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Wapsi Mili' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     cb_out     = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Money Out' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
-    total_out  = purchases + expenses + adspend + loan_out
+    total_out  = purchases + expenses + adspend + loan_out + loan_given
 
     # ── NET ───────────────────────────────────────────────────────
     net_cash   = total_in - total_out
@@ -2810,6 +2867,10 @@ def cashflow():
           <span style="color:#6B7280">Investment</span>
           <span class="g"><b>{pk(invest_in)}</b></span>
         </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Loan Wapsi Mili</span>
+          <span class="g"><b>{pk(loan_gotback)}</b></span>
+        </div>
         <div style="display:flex;justify-content:space-between;padding:10px 0;font-size:14px;font-weight:700">
           <span>Total Aaya</span>
           <span class="g">{pk(total_in)}</span>
@@ -2822,6 +2883,9 @@ def cashflow():
         <div style="font-size:11px;color:#6B7280;margin-bottom:10px">Period: {period}</div>
 
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
+          <span style="color:#6B7280">Loan Diya (kisi ko)</span>
+          <span class="r"><b>{pk(loan_given)}</b></span>
+        </div>        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;font-size:13px">
           <span style="color:#6B7280">Purchases (Paid)</span>
           <span class="r"><b>{pk(purchases)}</b></span>
         </div>
