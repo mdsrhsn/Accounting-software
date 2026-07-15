@@ -1109,7 +1109,14 @@ def cashbank():
     rc_lt = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Taken'",(cutoff,)).fetchone()["v"] or 0
     rc_lr = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE date>=%s AND type='Loan Repaid'",(cutoff,)).fetchone()["v"] or 0
     rc_pp = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE payment_date>=%s",(cutoff,)).fetchone()["v"] or 0
-    real_cash = float(rc_open) + float(rc_courier) - float(rc_pu) - float(rc_ex) - float(rc_ad) + float(rc_lt) - float(rc_lr)
+    rc_inv_all = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0
+    rc_co_all  = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier").fetchone()["v"] or 0
+    rc_pu_all  = qry(conn,"SELECT COALESCE(SUM(COALESCE(total_paid,0)),0) as v FROM purchases").fetchone()["v"] or 0
+    rc_ex_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
+    rc_ad_all  = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend").fetchone()["v"] or 0
+    rc_lt_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
+    rc_lr_all  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
+    real_cash = float(rc_inv_all) + float(rc_co_all) + float(rc_lt_all) - float(rc_pu_all) - float(rc_ex_all) - float(rc_ad_all) - float(rc_lr_all)
     conn.close()
 
     acc_btns = f"<a href='/cashbank' class='btn {'bp' if not acc_filter else ''}' style='font-size:11px;padding:5px 12px;margin-right:4px;margin-bottom:4px'>All</a>"
