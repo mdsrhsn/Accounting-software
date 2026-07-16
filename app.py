@@ -370,7 +370,8 @@ def dashboard():
     inv = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM investment").fetchone()["v"] or 0
     ll  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken'").fetchone()["v"] or 0
     lw  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Repaid'").fetchone()["v"] or 0
-    net = float(co) - float(pu) - float(ex) - float(tad)
+    pu_paid_p = qry(conn,f"SELECT COALESCE(SUM(COALESCE(total_paid,0)),0) as v FROM purchases {w_pu}",p2).fetchone()["v"] or 0
+    net = float(co) - float(pu_paid_p) - float(ex) - float(tad)
     co_all = qry(conn,"SELECT COALESCE(SUM(net_amount),0) as v FROM courier").fetchone()["v"] or 0
     pu_all = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status!='Unpaid'").fetchone()["v"] or 0
     ex_all = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
@@ -620,8 +621,8 @@ def purchases():
     acc_opts_purchase = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
     rows   = qry(conn,"SELECT * FROM purchases ORDER BY created_at DESC").fetchall()
     total  = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases").fetchone()["v"] or 0
-    paid   = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status='Paid'").fetchone()["v"] or 0
-    unpaid = qry(conn,"SELECT COALESCE(SUM(total_amount),0) as v FROM purchases WHERE status='Unpaid'").fetchone()["v"] or 0
+    paid   = qry(conn,"SELECT COALESCE(SUM(COALESCE(total_paid,0)),0) as v FROM purchases").fetchone()["v"] or 0
+    unpaid = float(total) - float(paid)
     conn.close()
 
     summary_cards = ""
@@ -1089,23 +1090,23 @@ def cashbank():
     else:
         rows = qry(conn,"SELECT * FROM cashbank ORDER BY date ASC, created_at ASC").fetchall()
 
-   # Dynamic account list: default + courier banks
-        ACC_LIST = get_accounts()
+    # Dynamic account list: default + courier banks
+    ACC_LIST = get_accounts()
 
-        balances = {}
-        for acc in ACC_LIST:
-            # Manual entries (opening balance, money in/out)
-            in_  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type IN ('Money In','Opening Balance')",(acc,)).fetchone()["v"] or 0
-            out_ = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type='Money Out'",(acc,)).fetchone()["v"] or 0
-            # Courier income — match by bank_holder + bank_name
-            courier_in = qry(conn,"SELECT COALESCE(SUM(c.net_amount),0) as v FROM courier c JOIN courier_accounts ca ON ca.name = c.account_name WHERE %s = ca.bank_holder || ' — ' || ca.bank_name",(acc,)).fetchone()["v"] or 0
-            # Outflows
-            pu_out = qry(conn,"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
-            pp_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
-            ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
-            ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
-            balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
-        total_bal = sum(balances.values())
+    balances = {}
+    for acc in ACC_LIST:
+        # Manual entries (opening balance, money in/out)
+        in_  = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type IN ('Money In','Opening Balance')",(acc,)).fetchone()["v"] or 0
+        out_ = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE account=%s AND type='Money Out'",(acc,)).fetchone()["v"] or 0
+        # Courier income — match by bank_holder + bank_name
+        courier_in = qry(conn,"SELECT COALESCE(SUM(c.net_amount),0) as v FROM courier c JOIN courier_accounts ca ON ca.name = c.account_name WHERE %s = ca.bank_holder || ' — ' || ca.bank_name",(acc,)).fetchone()["v"] or 0
+        # Outflows
+        pu_out = qry(conn,"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+        pp_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM purchase_payments WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+        ex_out = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+        ad_out = qry(conn,"SELECT COALESCE(SUM(total_pkr),0) as v FROM ad_spend WHERE paid_from_account=%s",(acc,)).fetchone()["v"] or 0
+        balances[acc] = float(in_) - float(out_) + float(courier_in) - float(pu_out) - float(ex_out) - float(ad_out)
+    total_bal = sum(balances.values())
      # Real Cash in Hand — cutoff date approach (29 May 2026 onwards)
     cutoff = REAL_CASH_CUTOFF
     rc_open = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Opening Balance' AND date<%s",(cutoff,)).fetchone()["v"] or 0
@@ -2782,7 +2783,6 @@ def cashflow():
     loan_in    = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Taken' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     invest_in  = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM investment {w}", p2).fetchone()["v"] or 0)
     cb_in      = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type IN ('Money In','Opening Balance') {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
-    total_in   = cod_in + loan_in + invest_in + loan_gotback
 
     # ── CASH OUT ──────────────────────────────────────────────────
     purchases  = float(qry(conn, f"SELECT COALESCE(SUM(total_paid),0) as v FROM purchases WHERE 1=1 {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
@@ -2792,6 +2792,7 @@ def cashflow():
     loan_given = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Diya' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     loan_gotback = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM loans WHERE type='Loan Wapsi Mili' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
     cb_out     = float(qry(conn, f"SELECT COALESCE(SUM(amount),0) as v FROM cashbank WHERE type='Money Out' {('AND date>=%s AND date<=%s' if date_from and date_to else ('AND date>=%s' if date_from else ('AND date<=%s' if date_to else '')))}",  p2).fetchone()["v"] or 0)
+    total_in   = cod_in + loan_in + invest_in + loan_gotback
     total_out  = purchases + expenses + adspend + loan_out + loan_given
 
     # ── NET ───────────────────────────────────────────────────────
