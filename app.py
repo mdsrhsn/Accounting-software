@@ -5,7 +5,12 @@ from datetime import date, datetime
 from functools import wraps
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "bizhisaab2025secret")
+_sk = os.environ.get("SECRET_KEY", "").strip()
+if not _sk:
+    # Railway Variables mein SECRET_KEY set karo — warna har restart pe sab logout honge
+    _sk = os.urandom(32).hex()
+    print("WARNING: SECRET_KEY env variable set nahi hai — random key use ho rahi hai")
+app.secret_key = _sk
 from flask_cors import CORS
 import requests as ext_req
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
@@ -16,7 +21,7 @@ else:
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 REAL_CASH_CUTOFF = os.environ.get("REAL_CASH_CUTOFF", "2026-05-29")
 SHOW_LOGIN_HINT = os.environ.get("SHOW_LOGIN_HINT", "").lower() in ("1", "true", "yes")
-POSTEX_TOKEN = os.environ.get("POSTEX_TOKEN", "ZmU0N2Q4OTU2NTNlNDg2NGFlMDgwM2E2ZTc3ZTEwMjM6ZDgzMDZiMWI2YjU0NDI2M2E1ODY4MTM1MTU1MGUwNDA=")
+POSTEX_TOKEN = os.environ.get("POSTEX_TOKEN", "")  # Railway Variables mein set karo
 DIGI_PHONE = os.environ.get("DIGI_PHONE", "923123456789")
 DIGI_PASS = os.environ.get("DIGI_PASS", "12345678")
 DIGI_BASE = os.environ.get("DIGI_BASE", "https://dev.digidokaan.pk/api/v1/digidokaan")
@@ -689,64 +694,193 @@ def del_purchase(i):
 @app.route("/expenses", methods=["GET","POST"])
 @login_req
 def expenses():
+    from markupsafe import escape as esc
     conn = get_db()
     cats = [r["name"] for r in qry(conn,"SELECT name FROM exp_categories ORDER BY name").fetchall()]
+    admin = is_admin()
+    me = session.get("naam","")
+
+    # ── SAVE NEW EXPENSE ──
     if request.method == "POST":
         f = request.form
+        try:
+            amt = float(f.get("amount") or 0)
+        except ValueError:
+            amt = 0
+        if amt <= 0:
+            conn.close()
+            session.setdefault('_flashes',[]).append(("danger","Amount 0 se zyada honi chahiye — entry save nahi hui"))
+            return redirect("/expenses")
         qry(conn,"INSERT INTO expenses (date,category,description,paid_to,amount,payment_method,added_by,paid_from_account) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (f.get("date") or today(), f.get("category",""), f.get("description",""),
-                 f.get("paid_to",""), float(f.get("amount") or 0), f.get("payment_method","Cash"), session.get("naam",""), f.get("paid_from_account","")))
+                (f.get("date") or today(), f.get("category",""), f.get("description","").strip(),
+                 f.get("paid_to","").strip(), amt, f.get("payment_method","Cash"), me, f.get("paid_from_account","")))
         conn.commit(); conn.close()
-        session.setdefault('_flashes',[]).append(("success","Expense saved!"))
+        session.setdefault('_flashes',[]).append(("success",f"Expense saved! ({pk(amt)})"))
         return redirect("/expenses")
-    acc_opts_exp = "".join([f"<option value='{a}'>{a}</option>" for a in get_accounts()])
-    rows  = qry(conn,"SELECT * FROM expenses ORDER BY created_at DESC").fetchall()
-    total = qry(conn,"SELECT COALESCE(SUM(amount),0) as v FROM expenses").fetchone()["v"] or 0
-    by_cat= qry(conn,"SELECT category, SUM(amount) t FROM expenses GROUP BY category ORDER BY t DESC").fetchall()
+
+    # ── FILTERS (sirf dikhane ke liye — data change nahi hota) ──
+    a = request.args
+    f_from = a.get("from","").strip()
+    f_to   = a.get("to","").strip()
+    f_cat  = a.get("cat","").strip()
+    f_acc  = a.get("acc","").strip()
+    f_q    = a.get("q","").strip()
+
+    where, params = [], []
+    if not admin:
+        where.append("added_by=%s"); params.append(me)   # employee sirf apni entries dekhe
+    if f_from: where.append("date >= %s"); params.append(f_from)
+    if f_to:   where.append("date <= %s"); params.append(f_to)
+    if f_cat:  where.append("category = %s"); params.append(f_cat)
+    if f_acc:  where.append("paid_from_account = %s"); params.append(f_acc)
+    if f_q:
+        where.append("(description ILIKE %s OR paid_to ILIKE %s)")
+        params += [f"%{f_q}%", f"%{f_q}%"]
+    wsql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    accounts = get_accounts()
+    rows   = qry(conn,f"SELECT * FROM expenses {wsql} ORDER BY date DESC, id DESC",tuple(params)).fetchall()
+    total  = qry(conn,f"SELECT COALESCE(SUM(amount),0) as v, COUNT(*) as c FROM expenses {wsql}",tuple(params)).fetchone()
+    by_cat = qry(conn,f"SELECT category, SUM(amount) t, COUNT(*) c FROM expenses {wsql} GROUP BY category ORDER BY t DESC",tuple(params)).fetchall()
     conn.close()
 
-    cat_opts = "".join([f"<option>{c}</option>" for c in cats])
-    trs = "".join([f"""<tr><td>{r['date']}</td><td><span class='badge bg-w'>{r['category']}</span></td>
-        <td>{r['description']}</td><td>{r['paid_to'] or '—'}</td>
-        <td class='r'><b>{pk(r['amount'])}</b></td><td>{r['payment_method']}</td>
-        <td style='color:#9CA3AF;font-size:10px'>{r['added_by']}</td>
-        {'<td><a href="/expenses/del/'+str(r["id"])+'" class="btn bd" onclick="return confirm(\'Delete?\')">Del</a></td>' if session.get('role')=='admin' else ''}
-        </tr>""" for r in rows]) or "<tr><td colspan='8' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
-    cat_sum = "".join([f"<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px'><span>{r['category']}</span><span class='r'><b>{pk(r['t'])}</b></span></div>" for r in by_cat]) or "<div style='color:#9CA3AF;font-size:12px;padding:8px'>No data</div>"
+    is_filtered = any([f_from, f_to, f_cat, f_acc, f_q])
+    d = date.today()
+    month_start = d.replace(day=1).isoformat()
+
+    acc_opts_exp = "".join([f"<option value='{esc(x)}'>{esc(x)}</option>" for x in accounts])
+    cat_opts = "".join([f"<option>{esc(c)}</option>" for c in cats])
+    f_cat_opts = "<option value=''>Sab Categories</option>" + "".join([f"<option value='{esc(c)}' {'selected' if c==f_cat else ''}>{esc(c)}</option>" for c in cats])
+    f_acc_opts = "<option value=''>Sab Accounts</option>" + "".join([f"<option value='{esc(x)}' {'selected' if x==f_acc else ''}>{esc(x)}</option>" for x in accounts])
+
+    def act(r):
+        if not admin: return ""
+        return (f"<td style='white-space:nowrap'><a href='/expenses/edit/{r['id']}' class='btn bp' style='padding:4px 9px;font-size:11px'>Edit</a> "
+                f"<a href='/expenses/del/{r['id']}' class='btn bd' onclick=\"return confirm('Ye expense delete karni hai? ({pk(r['amount'])})')\">Del</a></td>")
+
+    ncols = 9 if admin else 8
+    trs = "".join([f"""<tr><td style='white-space:nowrap'>{esc(r['date'] or '')}</td><td><span class='badge bg-w'>{esc(r['category'] or '')}</span></td>
+        <td>{esc(r['description'] or '')}</td><td>{esc(r['paid_to'] or '—')}</td>
+        <td class='r' style='white-space:nowrap'><b>{pk(r['amount'])}</b></td>
+        <td style='font-size:10px'>{esc(r.get('paid_from_account') or '—')}</td>
+        <td>{esc(r['payment_method'] or '')}</td>
+        <td style='color:#9CA3AF;font-size:10px'>{esc(r['added_by'] or '')}</td>
+        {act(r)}</tr>""" for r in rows]) or f"<tr><td colspan='{ncols}' style='text-align:center;color:#9CA3AF;padding:14px'>No records</td></tr>"
+
+    cat_sum = "".join([f"<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F1F5F9;font-size:12px'><span>{esc(r['category'] or '—')} <span style='color:#9CA3AF'>({r['c']})</span></span><span class='r'><b>{pk(r['t'])}</b></span></div>" for r in by_cat]) or "<div style='color:#9CA3AF;font-size:12px;padding:8px'>No data</div>"
 
     add_cat = ""
-    if session.get("role") == "admin":
+    if admin:
         add_cat = """<hr style="margin:12px 0;border:none;border-top:1px solid #E2E8F0">
         <div style="font-size:11px;color:#6B7280;margin-bottom:6px">Add New Category:</div>
         <form method="POST" action="/expenses/category" style="display:flex;gap:8px">
         <input name="name" placeholder="Category name" style="padding:6px 9px;border:1px solid #E2E8F0;border-radius:7px;font-size:12px;flex:1">
         <button class="btn bs" type="submit">Add</button></form>"""
 
+    filter_box = f"""<div class="card"><div class="ct">🔍 Filter / Search</div>
+    <form method="GET" action="/expenses">
+    <div class="fgrid">
+      <div class="fg"><label>From</label><input type="date" name="from" value="{esc(f_from)}"></div>
+      <div class="fg"><label>To</label><input type="date" name="to" value="{esc(f_to)}"></div>
+      <div class="fg"><label>Category</label><select name="cat">{f_cat_opts}</select></div>
+      <div class="fg"><label>Paid From Account</label><select name="acc">{f_acc_opts}</select></div>
+      <div class="fg"><label>Search</label><input name="q" value="{esc(f_q)}" placeholder="Description / Paid To"></div>
+    </div>
+    <button class="btn bp" type="submit">Filter</button>
+    <a href="/expenses?from={month_start}" class="btn" style="background:#F1F5F9;color:#374151">Is Mahine</a>
+    <a href="/expenses?from={d.isoformat()}&to={d.isoformat()}" class="btn" style="background:#F1F5F9;color:#374151">Aaj</a>
+    {'<a href="/expenses" class="btn" style="background:#FEE2E2;color:#991B1B">✕ Clear</a>' if is_filtered else ''}
+    </form></div>"""
+
+    title_txt = ("Filtered Expenses" if is_filtered else "All Expenses") if admin else "Meri Entries"
     body = f"""{flashes()}
     <div class="card"><div class="ct">Add New Expense</div>
-    <form method="POST" action="/expenses">
+    <form method="POST" action="/expenses" onsubmit="var b=this.querySelector('button[type=submit]');if(b.disabled)return false;b.disabled=true;b.innerText='Saving...';">
     <div class="fgrid">
       <div class="fg"><label>Category</label><select name="category">{cat_opts}</select></div>
       <div class="fg"><label>Description</label><input name="description" placeholder="Details" required></div>
-      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" placeholder="0" required></div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" min="0.01" placeholder="0" required></div>
       <div class="fg"><label>Paid To</label><input name="paid_to" placeholder="Optional"></div>
-     <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_exp}</select></div>
+      <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_exp}</select></div>
       <div class="fg"><label>Payment Method</label><select name="payment_method"><option>Cash</option><option>JazzCash</option><option>EasyPaisa</option><option>Bank Transfer</option><option>Cheque</option></select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div>
     <button class="btn bp" type="submit">✓ Save Expense</button>
     </form>{add_cat}</div>
+    {filter_box}
     <div class="g2">
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div class="ct" style="margin:0">All Expenses — Total: <span class="r">{pk(total)}</span></div>
-      {f'<a href="/export/expenses" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>' if is_admin() else ''}
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <div class="ct" style="margin:0">{title_txt} ({total['c']}) — Total: <span class="r">{pk(total['v'])}</span></div>
+      {f'<a href="/export/expenses" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Export</a>' if admin else ''}
     </div><div class="tw"><table>
-      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid To</th><th>Amount</th><th>Method</th><th>Added By</th>{'<th></th>' if session.get('role')=='admin' else ''}</tr></thead>
+      <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid To</th><th>Amount</th><th>Paid From</th><th>Method</th><th>Added By</th>{'<th></th>' if admin else ''}</tr></thead>
       <tbody>{trs}</tbody></table></div></div>
-    <div class="card"><div class="ct">Category Breakdown</div>{cat_sum}</div>
+    <div class="card"><div class="ct">Category Breakdown{' (filtered)' if is_filtered else ''}</div>{cat_sum}</div>
     </div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
     return layout("Expenses","exp",body)
+
+@app.route("/expenses/edit/<int:i>", methods=["GET","POST"])
+@login_req
+@admin_req
+def edit_expense(i):
+    from markupsafe import escape as esc
+    conn = get_db()
+    r = qry(conn,"SELECT * FROM expenses WHERE id=%s",(i,)).fetchone()
+    if not r:
+        conn.close()
+        session.setdefault('_flashes',[]).append(("danger","Expense nahi mili"))
+        return redirect("/expenses")
+    if request.method == "POST":
+        f = request.form
+        try:
+            amt = float(f.get("amount") or 0)
+        except ValueError:
+            amt = 0
+        if amt <= 0:
+            conn.close()
+            session.setdefault('_flashes',[]).append(("danger","Amount 0 se zyada honi chahiye — kuch change nahi hua"))
+            return redirect(f"/expenses/edit/{i}")
+        qry(conn,"""UPDATE expenses SET date=%s, category=%s, description=%s, paid_to=%s,
+                    amount=%s, payment_method=%s, paid_from_account=%s WHERE id=%s""",
+            (f.get("date") or r["date"], f.get("category", r["category"]), f.get("description","").strip(),
+             f.get("paid_to","").strip(), amt, f.get("payment_method", r["payment_method"]),
+             f.get("paid_from_account", r.get("paid_from_account") or ""), i))
+        conn.commit(); conn.close()
+        session.setdefault('_flashes',[]).append(("success",f"Expense update ho gayi ({pk(r['amount'])} → {pk(amt)})"))
+        return redirect("/expenses")
+    cats = [c["name"] for c in qry(conn,"SELECT name FROM exp_categories ORDER BY name").fetchall()]
+    conn.close()
+
+    # Purani value list mein na ho to bhi dropdown mein rahe — taake save pe gum na ho
+    cur_cat = r["category"] or ""
+    if cur_cat not in cats: cats = [cur_cat] + cats
+    accs = get_accounts()
+    cur_acc = r.get("paid_from_account") or ""
+    if cur_acc not in accs: accs = [cur_acc] + accs
+    methods = ["Cash","JazzCash","EasyPaisa","Bank Transfer","Cheque"]
+    cur_m = r["payment_method"] or "Cash"
+    if cur_m not in methods: methods = [cur_m] + methods
+
+    def opts(lst, cur):
+        return "".join([f"<option value='{esc(x)}' {'selected' if x==cur else ''}>{esc(x) if x else '— (khali)'}</option>" for x in lst])
+
+    body = f"""{flashes()}
+    <a href="/expenses" class="btn" style="background:#fff;border:1px solid #E2E8F0;margin-bottom:12px">← Wapis Expenses</a>
+    <div class="card"><div class="ct">Edit Expense #{i} <span style="font-size:11px;color:#9CA3AF;font-weight:400">— added by {esc(r['added_by'] or '')}</span></div>
+    <form method="POST" action="/expenses/edit/{i}" onsubmit="var b=this.querySelector('button[type=submit]');if(b.disabled)return false;b.disabled=true;b.innerText='Saving...';">
+    <div class="fgrid">
+      <div class="fg"><label>Category</label><select name="category">{opts(cats,cur_cat)}</select></div>
+      <div class="fg"><label>Description</label><input name="description" value="{esc(r['description'] or '')}" required></div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" min="0.01" value="{r['amount'] or 0}" required></div>
+      <div class="fg"><label>Paid To</label><input name="paid_to" value="{esc(r['paid_to'] or '')}"></div>
+      <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{opts(accs,cur_acc)}</select></div>
+      <div class="fg"><label>Payment Method</label><select name="payment_method">{opts(methods,cur_m)}</select></div>
+      <div class="fg"><label>Date</label><input name="date" type="date" value="{esc(r['date'] or '')}"></div>
+    </div>
+    <button class="btn bp" type="submit">✓ Update Expense</button>
+    </form></div>"""
+    return layout("Edit Expense","exp",body)
 
 @app.route("/expenses/del/<int:i>")
 @login_req
@@ -2030,6 +2164,7 @@ def add_ad_account():
 
 @app.route("/export/adspend")
 @login_req
+@admin_req
 def exp_adspend():
     conn = get_db()
     rows = qry(conn,"SELECT date,platform,ad_account_name,site,dollar_amount,dollar_rate,pkr_amount,tax_amount,total_pkr,description,added_by FROM ad_spend ORDER BY date DESC").fetchall()
@@ -2049,6 +2184,7 @@ def make_csv(headers, rows, filename):
 
 @app.route("/export/purchases")
 @login_req
+@admin_req
 def exp_purchases():
     conn = get_db()
     rows = qry(conn,"SELECT date,vendor,product,quantity,unit,per_unit_price,total_amount,status,notes,added_by FROM purchases ORDER BY date DESC").fetchall()
@@ -2057,6 +2193,7 @@ def exp_purchases():
 
 @app.route("/export/expenses")
 @login_req
+@admin_req
 def exp_expenses():
     conn = get_db()
     rows = qry(conn,"SELECT date,category,description,paid_to,amount,payment_method,added_by FROM expenses ORDER BY date DESC").fetchall()
@@ -2065,6 +2202,7 @@ def exp_expenses():
 
 @app.route("/export/courier")
 @login_req
+@admin_req
 def exp_courier():
     conn = get_db()
     rows = qry(conn,"SELECT date,courier_name,type,parcels,total_cod,charges,net_amount,reference,added_by FROM courier ORDER BY date DESC").fetchall()
@@ -2091,6 +2229,7 @@ def exp_loans():
 
 @app.route("/export/cashbank")
 @login_req
+@admin_req
 def exp_cashbank():
     conn = get_db()
     rows = qry(conn,"SELECT date,account,type,description,amount,added_by FROM cashbank ORDER BY date ASC").fetchall()
