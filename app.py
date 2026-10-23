@@ -226,6 +226,7 @@ def layout(title, page, body):
         admin_links = f"""
         <a href="/adspend" class="{'on' if page=='ads' else ''}">📣 Ad Spend</a>
         <a href="/cashbank" class="{'on' if page=='cb' else ''}">💵 Cash & Bank</a>
+        <a href="/petty-cash" class="{'on' if page=='petty' else ''}">👛 Petty Cash</a>
         <a href="/investment" class="{'on' if page=='inv' else ''}">💰 Investment</a>
         <a href="/loan" class="{'on' if page=='ln' else ''}">🏦 Loans</a>
         <a href="/rename" class="{'on' if page=='rn' else ''}">✏️ Rename</a>
@@ -793,7 +794,18 @@ def expenses():
     </form></div>"""
 
     title_txt = ("Filtered Expenses" if is_filtered else "All Expenses") if admin else "Meri Entries"
-    body = f"""{flashes()}
+    my_petty = ""
+    if not admin:
+        try:
+            _ensure_petty()
+            _c = get_db(); _s = _petty_status(_c, me); _c.close()
+            if _s["given"]:
+                my_petty = f"""<div class="grid"><div class="met"><div class="ml">Mujhe Mile</div><div class="mv g">{pk(_s['given'])}</div></div>
+                <div class="met"><div class="ml">Maine Lagaye</div><div class="mv r">{pk(_s['spent'])}</div></div>
+                <div class="met"><div class="ml">Mere paas Baqi</div><div class="mv b">{pk(_s['left'])}</div></div></div>"""
+        except Exception:
+            my_petty = ""
+    body = f"""{flashes()}{my_petty}
     <div class="card"><div class="ct">Add New Expense</div>
     <form method="POST" action="/expenses" onsubmit="var b=this.querySelector('button[type=submit]');if(b.disabled)return false;b.disabled=true;b.innerText='Saving...';">
     <div class="fgrid">
@@ -3886,3 +3898,134 @@ def expense_category_detail(cat_name):
     </div>
     """
     return layout(f"Expense: {cat_name}","exp",body)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PETTY CASH — employee ko kitne diye, usne kitne lagaye, kitne baqi
+# Sirf tracker hai: Cash & Bank / Dashboard / P&L ke kisi number ko change nahi karta.
+# "Lagaye" = employee ki apni Expenses entries (pehli dafa paise dene ki date se).
+# ═══════════════════════════════════════════════════════════════════
+def _ensure_petty():
+    conn = get_db()
+    conn.cursor().execute("""CREATE TABLE IF NOT EXISTS petty_cash (
+        id SERIAL PRIMARY KEY, date TEXT, employee TEXT, amount REAL,
+        from_account TEXT DEFAULT '', note TEXT DEFAULT '', added_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW())""")
+    conn.commit(); conn.close()
+
+def _petty_status(conn, emp):
+    """Ek employee ka hisaab: diye, lagaye (pehli payment ki date se), baqi"""
+    g = qry(conn,"SELECT COALESCE(SUM(amount),0) v, MIN(date) d FROM petty_cash WHERE employee=%s",(emp,)).fetchone()
+    given, start = float(g["v"] or 0), g["d"]
+    spent = 0.0
+    if start:
+        spent = float(qry(conn,"SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE added_by=%s AND date>=%s",(emp,start)).fetchone()["v"] or 0)
+    return {"given": given, "spent": spent, "left": given - spent, "start": start}
+
+@app.route("/petty-cash", methods=["GET","POST"])
+@login_req
+@admin_req
+def petty_cash():
+    from markupsafe import escape as esc
+    _ensure_petty()
+    conn = get_db()
+    emps = [r["n"] for r in qry(conn,"SELECT COALESCE(NULLIF(naam,''),username) n FROM users WHERE role='employee' ORDER BY 1").fetchall()]
+    if request.method == "POST":
+        f = request.form
+        try: amt = float(f.get("amount") or 0)
+        except ValueError: amt = 0
+        emp = f.get("employee","").strip()
+        if amt <= 0 or not emp:
+            conn.close()
+            session.setdefault('_flashes',[]).append(("danger","Employee aur amount (0 se zyada) dono zaroori hain"))
+            return redirect("/petty-cash")
+        qry(conn,"INSERT INTO petty_cash (date,employee,amount,from_account,note,added_by) VALUES (%s,%s,%s,%s,%s,%s)",
+            (f.get("date") or today(), emp, amt, f.get("from_account",""), f.get("note","").strip(), session.get("naam","")))
+        conn.commit(); conn.close()
+        session.setdefault('_flashes',[]).append(("success",f"{emp} ko {pk(amt)} diye — record ho gaya"))
+        return redirect("/petty-cash")
+
+    names = sorted(set(emps) | {r["employee"] for r in qry(conn,"SELECT DISTINCT employee FROM petty_cash").fetchall()})
+    stats = [(n, _petty_status(conn, n)) for n in names]
+    conn.close()
+
+    emp_opts = "".join([f"<option value='{esc(e)}'>{esc(e)}</option>" for e in emps])
+    acc_opts = "".join([f"<option value='{esc(a)}'>{esc(a)}</option>" for a in get_accounts()])
+    trs = "".join([f"""<tr><td><b>{esc(n)}</b></td><td class='g'><b>{pk(s['given'])}</b></td><td class='r'><b>{pk(s['spent'])}</b></td>
+        <td style='font-weight:700;color:{"#16A34A" if s["left"]>=0 else "#DC2626"}'>{pk(s['left'])}{' <span class="badge bg-r">zyada kharch</span>' if s['left']<0 else ''}</td>
+        <td style='color:#6B7280'>{esc(s['start'] or '—')}</td>
+        <td><a href='/petty-cash/{esc(n)}' class='btn bp' style='padding:4px 10px;font-size:11px'>👁 Detail</a></td></tr>"""
+        for n, s in stats if s["given"] or n in emps]) or "<tr><td colspan='6' style='text-align:center;color:#9CA3AF;padding:14px'>Pehle Users page se employee banao</td></tr>"
+
+    tg = sum(s["given"] for _, s in stats); ts = sum(s["spent"] for _, s in stats)
+    body = f"""{flashes()}
+    <div class="alert al-i">Ye page sirf hisaab dikhata hai — Cash &amp; Bank / P&amp;L ke numbers change nahi hote. Employee apne kharche <b>Expenses</b> mein daale (Paid From = jis account se tumne paise diye).</div>
+    <div class="grid">
+      <div class="met"><div class="ml">Total Diye</div><div class="mv g">{pk(tg)}</div></div>
+      <div class="met"><div class="ml">Total Lagaye</div><div class="mv r">{pk(ts)}</div></div>
+      <div class="met"><div class="ml">Employees ke paas Baqi</div><div class="mv b">{pk(tg-ts)}</div></div>
+    </div>
+    <div class="card"><div class="ct">💵 Employee ko Paise Diye</div>
+    <form method="POST" action="/petty-cash" onsubmit="var b=this.querySelector('button[type=submit]');if(b.disabled)return false;b.disabled=true;b.innerText='Saving...';">
+    <div class="fgrid">
+      <div class="fg"><label>Employee</label><select name="employee" required>{emp_opts}</select></div>
+      <div class="fg"><label>Amount (PKR)</label><input name="amount" type="number" step="0.01" min="0.01" required></div>
+      <div class="fg"><label>Kis Account se Diye</label><select name="from_account">{acc_opts}</select></div>
+      <div class="fg"><label>Note</label><input name="note" placeholder="Optional — masalan office kharcha"></div>
+      <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
+    </div>
+    <button class="btn bp" type="submit">✓ Save</button></form></div>
+    <div class="card"><div class="ct">Employee-wise Hisaab</div><div class="tw"><table>
+      <thead><tr><th>Employee</th><th>Diye</th><th>Lagaye</th><th>Baqi</th><th>Shuru Date</th><th></th></tr></thead>
+      <tbody>{trs}</tbody></table></div></div>
+    <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
+    return layout("Petty Cash","petty",body)
+
+@app.route("/petty-cash/<path:emp>")
+@login_req
+@admin_req
+def petty_cash_detail(emp):
+    from markupsafe import escape as esc
+    _ensure_petty()
+    conn = get_db()
+    s = _petty_status(conn, emp)
+    gives = qry(conn,"SELECT * FROM petty_cash WHERE employee=%s",(emp,)).fetchall()
+    exps = qry(conn,"SELECT * FROM expenses WHERE added_by=%s AND date>=%s",(emp, s["start"])).fetchall() if s["start"] else []
+    conn.close()
+    items = [(g["date"] or "", 0, g["id"], "give", g) for g in gives] + [(e["date"] or "", 1, e["id"], "exp", e) for e in exps]
+    items.sort(key=lambda x: (x[0], x[1], x[2]))
+    bal, trs = 0.0, ""
+    for d, _, _, kind, r in items:
+        if kind == "give":
+            bal += float(r["amount"] or 0)
+            trs += f"""<tr><td>{esc(d)}</td><td><span class='badge bg-g'>Diye</span></td><td>{esc(r['note'] or '—')} <span style='color:#9CA3AF;font-size:10px'>({esc(r['from_account'] or '')})</span></td>
+                <td class='g'><b>+ {pk(r['amount'])}</b></td><td style='font-weight:700'>{pk(bal)}</td>
+                <td><a href='/petty-cash/del/{r['id']}' class='btn bd' onclick="return confirm('Ye entry delete karni hai? ({pk(r['amount'])})')">Del</a></td></tr>"""
+        else:
+            bal -= float(r["amount"] or 0)
+            trs += f"""<tr><td>{esc(d)}</td><td><span class='badge bg-w'>{esc(r['category'] or 'Kharcha')}</span></td><td>{esc(r['description'] or '')}</td>
+                <td class='r'><b>− {pk(r['amount'])}</b></td><td style='font-weight:700;color:{"#DC2626" if bal<0 else "#111827"}'>{pk(bal)}</td><td></td></tr>"""
+    trs = trs or "<tr><td colspan='6' style='text-align:center;color:#9CA3AF;padding:14px'>Abhi koi record nahi</td></tr>"
+    body = f"""{flashes()}
+    <a href="/petty-cash" class="btn" style="background:#fff;border:1px solid #E2E8F0;margin-bottom:12px">← Wapis Petty Cash</a>
+    <div class="grid">
+      <div class="met"><div class="ml">Diye</div><div class="mv g">{pk(s['given'])}</div></div>
+      <div class="met"><div class="ml">Lagaye</div><div class="mv r">{pk(s['spent'])}</div></div>
+      <div class="met"><div class="ml">Baqi (uske paas)</div><div class="mv" style="color:{'#16A34A' if s['left']>=0 else '#DC2626'}">{pk(s['left'])}</div></div>
+    </div>
+    <div class="card"><div class="ct">{esc(emp)} — Poora Hisaab</div><div class="tw"><table>
+      <thead><tr><th>Date</th><th>Type</th><th>Detail</th><th>Amount</th><th>Balance</th><th></th></tr></thead>
+      <tbody>{trs}</tbody></table></div></div>"""
+    return layout(f"Petty Cash: {emp}","petty",body)
+
+@app.route("/petty-cash/del/<int:i>")
+@login_req
+@admin_req
+def petty_cash_del(i):
+    _ensure_petty()
+    conn = get_db()
+    r = qry(conn,"SELECT employee FROM petty_cash WHERE id=%s",(i,)).fetchone()
+    qry(conn,"DELETE FROM petty_cash WHERE id=%s",(i,))
+    conn.commit(); conn.close()
+    session.setdefault('_flashes',[]).append(("info","Entry delete ho gayi"))
+    return redirect(f"/petty-cash/{r['employee']}" if r else "/petty-cash")
