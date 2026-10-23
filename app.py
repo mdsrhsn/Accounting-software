@@ -18,6 +18,16 @@ if _cors_origins:
     CORS(app, origins=[o.strip() for o in _cors_origins.split(",") if o.strip()], supports_credentials=True)
 else:
     CORS(app)
+PWA_HEAD = """<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BizHisaab">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>@media (display-mode: standalone){.topbar{padding-top:env(safe-area-inset-top);height:calc(50px + env(safe-area-inset-top))}.sb{padding-top:env(safe-area-inset-top)}body{padding-bottom:env(safe-area-inset-bottom)}}</style>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}</script>"""
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 REAL_CASH_CUTOFF = os.environ.get("REAL_CASH_CUTOFF", "2026-05-29")
 SHOW_LOGIN_HINT = os.environ.get("SHOW_LOGIN_HINT", "").lower() in ("1", "true", "yes")
@@ -263,8 +273,8 @@ def layout(title, page, body):
         <a href="/users" class="{'on' if page=='usr' else ''}">👥 Users</a>
         """
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BizHisaab - {title}</title>{CSS}</head><body>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BizHisaab - {title}</title>{CSS}{PWA_HEAD}</head><body>
     <nav class="sb" id="sidebar">
       <div class="sb-brand">📊 <span>Biz</span>Hisaab</div>
       <a href="/dashboard" class="{'on' if page=='dash' else ''}">🏠 Dashboard</a>
@@ -310,8 +320,8 @@ def login():
         err = '<div class="alert al-d">Invalid username or password!</div>'
     hint = '<div class="hint">Default: admin / admin123</div>' if SHOW_LOGIN_HINT else ""
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>BizHisaab — Login</title>{CSS}
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <title>BizHisaab — Login</title>{CSS}{PWA_HEAD}
     <style>body{{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0F172A 0%,#1e3a5f 100%);margin-left:0;min-height:100vh}}
     .box{{background:#fff;border-radius:14px;padding:36px;width:340px;max-width:95vw;box-shadow:0 20px 50px rgba(0,0,0,.25)}}
     .brand{{text-align:center;font-size:22px;font-weight:800;color:#0F172A;margin-bottom:5px}}
@@ -4061,3 +4071,58 @@ def petty_cash_del(i):
     conn.commit(); conn.close()
     session.setdefault('_flashes',[]).append(("info","Entry delete ho gayi"))
     return redirect(f"/petty-cash/{r['employee']}" if r else "/petty-cash")
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# APP (PWA) — phone/desktop par install. Hisaab ka koi page cache nahi hota:
+# har page hamesha live server se aata hai. Sirf icons + "internet nahi" page cache.
+# ═══════════════════════════════════════════════════════════════════
+@app.route("/manifest.webmanifest")
+def pwa_manifest():
+    import json
+    data = {
+        "name": "BizHisaab", "short_name": "BizHisaab",
+        "description": "Business Accounting System",
+        "start_url": "/dashboard", "scope": "/", "display": "standalone",
+        "background_color": "#0F172A", "theme_color": "#0F172A",
+        "icons": [
+            {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+        ]
+    }
+    return Response(json.dumps(data), mimetype="application/manifest+json")
+
+@app.route("/sw.js")
+def pwa_sw():
+    js = """
+const C='bh-shell-v1';
+const SHELL=['/offline','/static/icon-192.png','/static/icon-512.png','/static/favicon.png'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(SHELL)));self.skipWaiting();});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))));self.clients.claim();});
+self.addEventListener('fetch',e=>{
+  const r=e.request;
+  if(r.method!=='GET') return;                       // form save hamesha seedha server ko
+  if(r.mode==='navigate'){                           // pages: hamesha live, cache nahi
+    e.respondWith(fetch(r).catch(()=>caches.match('/offline')));
+    return;
+  }
+  if(new URL(r.url).pathname.startsWith('/static/')){
+    e.respondWith(caches.match(r).then(m=>m||fetch(r)));
+  }
+});
+"""
+    resp = Response(js, mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    return resp
+
+@app.route("/offline")
+def pwa_offline():
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>BizHisaab — Offline</title><meta name="theme-color" content="#0F172A"></head>
+    <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0F172A;font-family:'Segoe UI',sans-serif;color:#fff;text-align:center;padding:20px">
+    <div><img src="/static/icon-192.png" width="72" height="72" style="border-radius:16px"><h2 style="margin:16px 0 6px">Internet nahi hai</h2>
+    <p style="color:#94A3B8;font-size:14px;margin:0 0 18px">Connection check karo — koi entry save nahi hui.</p>
+    <button onclick="location.reload()" style="padding:11px 22px;border:none;border-radius:8px;background:#3B82F6;color:#fff;font-size:15px;font-weight:600">Dobara Try Karo</button></div></body></html>"""
