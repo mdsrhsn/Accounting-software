@@ -322,26 +322,49 @@ def login():
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <title>BizHisaab — Login</title>{CSS}{PWA_HEAD}
-    <style>body{{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0F172A 0%,#1e3a5f 100%);margin-left:0;min-height:100vh}}
-    .box{{background:#fff;border-radius:14px;padding:36px;width:340px;max-width:95vw;box-shadow:0 20px 50px rgba(0,0,0,.25)}}
-    .brand{{text-align:center;font-size:22px;font-weight:800;color:#0F172A;margin-bottom:5px}}
-    .brand span{{color:#3B82F6}}.sub{{text-align:center;font-size:12px;color:#6B7280;margin-bottom:24px}}
-    .lbl{{display:block;font-size:12px;color:#374151;font-weight:600;margin-bottom:4px}}
-    .inp{{width:100%;padding:10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;margin-bottom:14px}}
-    .lbtn{{width:100%;padding:11px;background:#3B82F6;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}}
-    .hint{{text-align:center;margin-top:12px;font-size:11px;color:#9CA3AF}}</style>
-    </head><body><div class="box">
-    <div class="brand">📊 <span>Biz</span>Hisaab</div>
-    <div class="sub">Business Accounting System</div>
+    <style>
+    body{{display:flex;align-items:center;justify-content:center;margin-left:0;min-height:100vh;min-height:100dvh;padding:20px;
+      background:linear-gradient(135deg,#6366F1 0%,#3B82F6 35%,#06B6D4 65%,#22C55E 100%);background-size:300% 300%;animation:bhbg 14s ease infinite;position:relative;overflow:hidden}}
+    @keyframes bhbg{{0%{{background-position:0% 50%}}50%{{background-position:100% 50%}}100%{{background-position:0% 50%}}}}
+    .blob{{position:fixed;border-radius:50%;filter:blur(60px);opacity:.55;z-index:0}}
+    .b1{{width:320px;height:320px;background:#F472B6;top:-90px;left:-80px}}
+    .b2{{width:280px;height:280px;background:#FACC15;bottom:-90px;right:-70px}}
+    .b3{{width:220px;height:220px;background:#A78BFA;top:45%;right:10%}}
+    .box{{position:relative;z-index:1;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:22px;padding:34px 28px 28px;width:360px;max-width:100%;box-shadow:0 25px 60px rgba(30,41,59,.30)}}
+    .logo{{display:block;width:72px;height:72px;margin:0 auto 14px;border-radius:18px;box-shadow:0 10px 25px rgba(59,130,246,.45)}}
+    .brand{{text-align:center;font-size:28px;font-weight:800;letter-spacing:-.5px;margin-bottom:4px;
+      background:linear-gradient(90deg,#4F46E5,#3B82F6,#10B981);-webkit-background-clip:text;background-clip:text;color:transparent}}
+    .sub{{text-align:center;font-size:13px;color:#64748B;margin-bottom:26px}}
+    .lbl{{display:block;font-size:12px;color:#334155;font-weight:700;margin-bottom:6px}}
+    .field{{position:relative;margin-bottom:16px}}
+    .field .ic{{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:16px;opacity:.7}}
+    .inp{{width:100%;padding:13px 44px 13px 40px;border:2px solid #E2E8F0;border-radius:12px;font-size:16px;background:#F8FAFC;transition:.2s;outline:none}}
+    .inp:focus{{border-color:#6366F1;background:#fff;box-shadow:0 0 0 4px rgba(99,102,241,.15)}}
+    .eye{{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:17px;cursor:pointer;padding:6px;opacity:.7}}
+    .lbtn{{width:100%;padding:14px;margin-top:6px;border:none;border-radius:12px;font-size:16px;font-weight:700;color:#fff;cursor:pointer;
+      background:linear-gradient(90deg,#6366F1,#3B82F6,#10B981);box-shadow:0 10px 24px rgba(59,130,246,.40);transition:transform .15s,box-shadow .15s}}
+    .lbtn:active{{transform:scale(.98)}}
+    .lbtn:disabled{{opacity:.75}}
+    .hint{{text-align:center;margin-top:14px;font-size:11px;color:#94A3B8}}
+    .foot{{text-align:center;margin-top:18px;font-size:11px;color:#94A3B8}}
+    </style>
+    </head><body>
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="box">
+    <img src="/static/icon-192.png" alt="" class="logo">
+    <div class="brand">BizHisaab</div>
+    <div class="sub">Apna business hisaab, ek jagah 📊</div>
     {err}
-    <form method="POST" action="/">
+    <form method="POST" action="/" onsubmit="var b=this.querySelector('.lbtn');b.disabled=true;b.innerText='Login ho raha hai...';">
     <label class="lbl">Username</label>
-    <input class="inp" name="username" placeholder="Enter username" required autofocus>
+    <div class="field"><span class="ic">👤</span><input class="inp" name="username" placeholder="Username likho" required autofocus autocapitalize="none" autocorrect="off" autocomplete="username"></div>
     <label class="lbl">Password</label>
-    <input class="inp" type="password" name="password" placeholder="Enter password" required>
-    <button class="lbtn" type="submit">Login</button>
+    <div class="field"><span class="ic">🔒</span><input class="inp" id="pw" type="password" name="password" placeholder="Password likho" required autocomplete="current-password">
+    <button type="button" class="eye" onclick="var p=document.getElementById('pw');p.type=p.type==='password'?'text':'password';this.innerText=p.type==='password'?'👁':'🙈';" aria-label="Password dikhao">👁</button></div>
+    <button class="lbtn" type="submit">Login →</button>
     </form>
     {hint}
+    <div class="foot">🔐 Secure login</div>
     </div></body></html>"""
 
 @app.route("/debug/adaccounts")
