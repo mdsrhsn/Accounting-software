@@ -39,7 +39,7 @@ a{text-decoration:none;color:inherit}
 .sb a:hover,.sb a.on{background:#3B82F6;color:#fff}
 .sb-foot{margin-top:auto;padding:12px 16px;font-size:11px;color:#475569;border-top:1px solid #1e293b}
 .sb-foot a{color:#EF4444;display:block;margin-top:6px}
-.main{margin-left:210px;flex:1;display:flex;flex-direction:column}
+.main{margin-left:210px;flex:1;display:flex;flex-direction:column;min-width:0}
 .topbar{background:#fff;border-bottom:1px solid #E2E8F0;padding:0 20px;height:50px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
 .topbar h1{font-size:14px;font-weight:600}
 .con{padding:16px 20px}
@@ -81,7 +81,35 @@ tr:hover td{background:#F8FAFC}
 .pnl-t{font-weight:700;background:#F8FAFC}
 .pnl-grand{display:flex;justify-content:space-between;font-size:14px;font-weight:700;background:#EFF6FF;border-radius:6px;padding:10px 12px;margin-top:8px}
 .mob-menu{display:none;background:none;border:1px solid #E2E8F0;border-radius:7px;padding:6px 10px;font-size:16px;cursor:pointer;color:#374151}
-@media(max-width:700px){.mob-menu{display:block}.sb{display:block;position:fixed;z-index:999;height:100%;transform:translateX(-100%);transition:.3s}.sb.open{transform:translateX(0)}.main{margin-left:0}.g2{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}}
+.sb-ov{display:none}
+@media(max-width:700px){
+.mob-menu{display:block}
+.sb{display:flex;position:fixed;z-index:999;width:240px;height:100%;transform:translateX(-100%);transition:transform .25s}
+.sb.open{transform:translateX(0);box-shadow:0 0 30px rgba(0,0,0,.35)}
+.sb a{padding:13px 18px;font-size:14px}
+.sb-ov.open{display:block;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:998}
+.main{margin-left:0;width:100%}
+.topbar{padding:0 12px;gap:10px}
+.topbar h1{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+.topbar>span{display:none}
+.con{padding:12px}
+.card{padding:12px;overflow-x:auto;min-width:0}
+.g2{grid-template-columns:1fr}
+.g2>*,.grid>*,.fgrid>*{min-width:0}
+.grid{grid-template-columns:1fr 1fr}
+.fgrid{grid-template-columns:1fr 1fr}
+.mv{font-size:15px;word-break:break-word}
+.con input,.con select,.con textarea{font-size:16px!important;max-width:100%}
+.fg input,.fg select{padding:10px}
+.btn{padding:10px 14px;font-size:13px}
+.bd{padding:7px 11px}
+.con form[style*="display:flex"]{flex-wrap:wrap}
+.con [style*="display:flex"]{flex-wrap:wrap}
+.con [style*="grid-template-columns"]{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))!important}
+table{font-size:12px}
+.tw{-webkit-overflow-scrolling:touch}
+}
+@media(max-width:420px){.fgrid{grid-template-columns:1fr}}
 </style>
 """
 
@@ -257,9 +285,13 @@ def layout(title, page, body):
       </div>
     </nav>
     <div class="main">
-      <div class="topbar"><button type="button" class="mob-menu" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">☰</button><h1>{title}</h1><span style="font-size:11px;color:#6B7280">👤 {session.get('naam','')}</span></div>
+      <div class="topbar"><button type="button" class="mob-menu" onclick="bhMenu()" aria-label="Menu">☰</button><h1>{title}</h1><span style="font-size:11px;color:#6B7280">👤 {session.get('naam','')}</span></div>
       <div class="con">{body}</div>
-    </div></body></html>"""
+    </div>
+    <div class="sb-ov" id="sbov" onclick="bhMenu(false)"></div>
+    <script>function bhMenu(o){{var s=document.getElementById('sidebar'),v=document.getElementById('sbov');var on=(o===undefined)?!s.classList.contains('open'):o;s.classList.toggle('open',on);v.classList.toggle('open',on);}}
+    document.querySelectorAll('#sidebar a').forEach(function(a){{a.addEventListener('click',function(){{bhMenu(false)}})}});</script>
+    </body></html>"""
 # ── LOGIN ─────────────────────────────────────────────────────────────────────
 @app.route("/", methods=["GET","POST"])
 def login():
