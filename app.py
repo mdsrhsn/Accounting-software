@@ -186,6 +186,7 @@ def init_db():
         "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS remaining REAL DEFAULT 0",
         "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS paid_from_account TEXT DEFAULT ''",
         "ALTER TABLE loans ADD COLUMN IF NOT EXISTS account TEXT DEFAULT ''",
+        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS petty_src TEXT DEFAULT ''",
     ]:
         try:
             cur.execute(col_sql)
@@ -777,9 +778,15 @@ def expenses():
             conn.close()
             session.setdefault('_flashes',[]).append(("danger","Amount 0 se zyada honi chahiye — entry save nahi hui"))
             return redirect("/expenses")
-        qry(conn,"INSERT INTO expenses (date,category,description,paid_to,amount,payment_method,added_by,paid_from_account) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        # petty_src: 'petty' = employee ke Petty Cash se (balance se minus), 'owner' = malik ne khud diye (sirf record)
+        psrc = f.get("petty_src","") if f.get("petty_src","") in ("petty","owner") else ""
+        if not admin and not psrc:
+            conn.close()
+            session.setdefault('_flashes',[]).append(("danger","'Paise kis ke the?' select karo — entry save nahi hui"))
+            return redirect("/expenses")
+        qry(conn,"INSERT INTO expenses (date,category,description,paid_to,amount,payment_method,added_by,paid_from_account,petty_src) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (f.get("date") or today(), f.get("category",""), f.get("description","").strip(),
-                 f.get("paid_to","").strip(), amt, f.get("payment_method","Cash"), me, f.get("paid_from_account","")))
+                 f.get("paid_to","").strip(), amt, f.get("payment_method","Cash"), me, f.get("paid_from_account",""), psrc))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success",f"Expense saved! ({pk(amt)})"))
         return redirect("/expenses")
@@ -826,7 +833,7 @@ def expenses():
 
     ncols = 9 if admin else 8
     trs = "".join([f"""<tr><td style='white-space:nowrap'>{esc(r['date'] or '')}</td><td><span class='badge bg-w'>{esc(r['category'] or '')}</span></td>
-        <td>{esc(r['description'] or '')}</td><td>{esc(r['paid_to'] or '—')}</td>
+        <td>{esc(r['description'] or '')}{"<br><span class='badge bg-b'>Malik ne diye</span>" if r.get('petty_src')=='owner' else ("<br><span class='badge bg-g'>Petty Cash</span>" if r.get('petty_src')=='petty' else '')}</td><td>{esc(r['paid_to'] or '—')}</td>
         <td class='r' style='white-space:nowrap'><b>{pk(r['amount'])}</b></td>
         <td style='font-size:10px'>{esc(r.get('paid_from_account') or '—')}</td>
         <td>{esc(r['payment_method'] or '')}</td>
@@ -881,6 +888,7 @@ def expenses():
       <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{acc_opts_exp}</select></div>
       <div class="fg"><label>Payment Method</label><select name="payment_method"><option>Cash</option><option>JazzCash</option><option>EasyPaisa</option><option>Bank Transfer</option><option>Cheque</option></select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
+      {'' if admin else """<div class="fg"><label>Paise kis ke the? *</label><select name="petty_src" required><option value="">— Select karo —</option><option value="petty">Mere Petty Cash se (mere paas wale)</option><option value="owner">Malik ne khud diye (sirf record)</option></select></div>"""}
     </div>
     <button class="btn bp" type="submit">✓ Save Expense</button>
     </form>{add_cat}</div>
@@ -918,11 +926,13 @@ def edit_expense(i):
             conn.close()
             session.setdefault('_flashes',[]).append(("danger","Amount 0 se zyada honi chahiye — kuch change nahi hua"))
             return redirect(f"/expenses/edit/{i}")
+        _ps = f.get("petty_src", r.get("petty_src") or "")
+        if _ps not in ("petty","owner",""): _ps = r.get("petty_src") or ""
         qry(conn,"""UPDATE expenses SET date=%s, category=%s, description=%s, paid_to=%s,
-                    amount=%s, payment_method=%s, paid_from_account=%s WHERE id=%s""",
+                    amount=%s, payment_method=%s, paid_from_account=%s, petty_src=%s WHERE id=%s""",
             (f.get("date") or r["date"], f.get("category", r["category"]), f.get("description","").strip(),
              f.get("paid_to","").strip(), amt, f.get("payment_method", r["payment_method"]),
-             f.get("paid_from_account", r.get("paid_from_account") or ""), i))
+             f.get("paid_from_account", r.get("paid_from_account") or ""), _ps, i))
         conn.commit(); conn.close()
         session.setdefault('_flashes',[]).append(("success",f"Expense update ho gayi ({pk(r['amount'])} → {pk(amt)})"))
         return redirect("/expenses")
@@ -953,6 +963,10 @@ def edit_expense(i):
       <div class="fg"><label>Paid To</label><input name="paid_to" value="{esc(r['paid_to'] or '')}"></div>
       <div class="fg"><label>Paid From Account</label><select name="paid_from_account">{opts(accs,cur_acc)}</select></div>
       <div class="fg"><label>Payment Method</label><select name="payment_method">{opts(methods,cur_m)}</select></div>
+      <div class="fg"><label>Paise kis ke the? (employee Petty Cash)</label><select name="petty_src">
+        <option value="" {'selected' if not r.get('petty_src') else ''}>— Purani entry / admin —</option>
+        <option value="petty" {'selected' if r.get('petty_src')=='petty' else ''}>Employee ke Petty Cash se</option>
+        <option value="owner" {'selected' if r.get('petty_src')=='owner' else ''}>Malik ne khud diye (sirf record)</option></select></div>
       <div class="fg"><label>Date</label><input name="date" type="date" value="{esc(r['date'] or '')}"></div>
     </div>
     <button class="btn bp" type="submit">✓ Update Expense</button>
@@ -3984,7 +3998,7 @@ def _petty_status(conn, emp):
     given, start = float(g["v"] or 0), g["d"]
     spent = 0.0
     if start:
-        spent = float(qry(conn,"SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE added_by=%s AND date>=%s",(emp,start)).fetchone()["v"] or 0)
+        spent = float(qry(conn,"SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE added_by=%s AND date>=%s AND COALESCE(petty_src,'')<>'owner'",(emp,start)).fetchone()["v"] or 0)
     return {"given": given, "spent": spent, "left": given - spent, "start": start}
 
 @app.route("/petty-cash", methods=["GET","POST"])
@@ -4055,7 +4069,7 @@ def petty_cash_detail(emp):
     conn = get_db()
     s = _petty_status(conn, emp)
     gives = qry(conn,"SELECT * FROM petty_cash WHERE employee=%s",(emp,)).fetchall()
-    exps = qry(conn,"SELECT * FROM expenses WHERE added_by=%s AND date>=%s",(emp, s["start"])).fetchall() if s["start"] else []
+    exps = qry(conn,"SELECT * FROM expenses WHERE added_by=%s AND date>=%s AND COALESCE(petty_src,'')<>'owner'",(emp, s["start"])).fetchall() if s["start"] else []
     conn.close()
     items = [(g["date"] or "", 0, g["id"], "give", g) for g in gives] + [(e["date"] or "", 1, e["id"], "exp", e) for e in exps]
     items.sort(key=lambda x: (x[0], x[1], x[2]))
