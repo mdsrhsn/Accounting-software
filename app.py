@@ -3996,9 +3996,9 @@ def _petty_status(conn, emp):
     """Ek employee ka hisaab: diye, lagaye (pehli payment ki date se), baqi"""
     g = qry(conn,"SELECT COALESCE(SUM(amount),0) v, MIN(date) d FROM petty_cash WHERE employee=%s",(emp,)).fetchone()
     given, start = float(g["v"] or 0), g["d"]
-    spent = 0.0
-    if start:
-        spent = float(qry(conn,"SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE added_by=%s AND date>=%s AND COALESCE(petty_src,'')<>'owner'",(emp,start)).fetchone()["v"] or 0)
+    # 'petty' mark wali entries hamesha (date koi bhi ho); bina mark wali purani entries sirf pehli payment ke baad se
+    spent = float(qry(conn,"""SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE added_by=%s AND
+        (petty_src='petty' OR (COALESCE(petty_src,'')='' AND %s IS NOT NULL AND date>=%s))""",(emp,start,start)).fetchone()["v"] or 0)
     return {"given": given, "spent": spent, "left": given - spent, "start": start}
 
 @app.route("/petty-cash", methods=["GET","POST"])
@@ -4069,7 +4069,8 @@ def petty_cash_detail(emp):
     conn = get_db()
     s = _petty_status(conn, emp)
     gives = qry(conn,"SELECT * FROM petty_cash WHERE employee=%s",(emp,)).fetchall()
-    exps = qry(conn,"SELECT * FROM expenses WHERE added_by=%s AND date>=%s AND COALESCE(petty_src,'')<>'owner'",(emp, s["start"])).fetchall() if s["start"] else []
+    exps = qry(conn,"""SELECT * FROM expenses WHERE added_by=%s AND
+        (petty_src='petty' OR (COALESCE(petty_src,'')='' AND %s IS NOT NULL AND date>=%s))""",(emp, s["start"], s["start"])).fetchall()
     conn.close()
     items = [(g["date"] or "", 0, g["id"], "give", g) for g in gives] + [(e["date"] or "", 1, e["id"], "exp", e) for e in exps]
     items.sort(key=lambda x: (x[0], x[1], x[2]))
