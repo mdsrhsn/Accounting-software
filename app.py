@@ -4054,7 +4054,7 @@ def petty_cash():
       <div class="fg"><label>Date</label><input name="date" type="date" id="dt"></div>
     </div>
     <button class="btn bp" type="submit">✓ Save</button></form></div>
-    <div class="card"><div class="ct">Employee-wise Hisaab</div><div class="tw"><table>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px"><div class="ct" style="margin:0">Employee-wise Hisaab</div><a href="/export/petty-cash" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a></div><div class="tw"><table>
       <thead><tr><th>Employee</th><th>Diye</th><th>Lagaye</th><th>Baqi</th><th>Shuru Date</th><th></th></tr></thead>
       <tbody>{trs}</tbody></table></div></div>
     <script>document.getElementById('dt').valueAsDate=new Date();</script>"""
@@ -4065,6 +4065,7 @@ def petty_cash():
 @admin_req
 def petty_cash_detail(emp):
     from markupsafe import escape as esc
+    from urllib.parse import quote
     _ensure_petty()
     conn = get_db()
     s = _petty_status(conn, emp)
@@ -4093,7 +4094,7 @@ def petty_cash_detail(emp):
       <div class="met"><div class="ml">Lagaye</div><div class="mv r">{pk(s['spent'])}</div></div>
       <div class="met"><div class="ml">Baqi (uske paas)</div><div class="mv" style="color:{'#16A34A' if s['left']>=0 else '#DC2626'}">{pk(s['left'])}</div></div>
     </div>
-    <div class="card"><div class="ct">{esc(emp)} — Poora Hisaab</div><div class="tw"><table>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px"><div class="ct" style="margin:0">{esc(emp)} — Poora Hisaab</div><a href="/export/petty-cash?emp={quote(emp)}" class="btn bs" style="font-size:11px;padding:5px 12px">⬇ Excel Export</a></div><div class="tw"><table>
       <thead><tr><th>Date</th><th>Type</th><th>Detail</th><th>Amount</th><th>Balance</th><th></th></tr></thead>
       <tbody>{trs}</tbody></table></div></div>"""
     return layout(f"Petty Cash: {emp}","petty",body)
@@ -4164,3 +4165,48 @@ def pwa_offline():
     <div><img src="/static/icon-192.png" width="72" height="72" style="border-radius:16px"><h2 style="margin:16px 0 6px">Internet nahi hai</h2>
     <p style="color:#94A3B8;font-size:14px;margin:0 0 18px">Connection check karo — koi entry save nahi hui.</p>
     <button onclick="location.reload()" style="padding:11px 22px;border:none;border-radius:8px;background:#3B82F6;color:#fff;font-size:15px;font-weight:600">Dobara Try Karo</button></div></body></html>"""
+
+
+@app.route("/export/petty-cash")
+@login_req
+@admin_req
+def export_petty_cash():
+    """Excel (CSV) — har employee ka poora ledger: Diye / Lagaye / Balance + summary"""
+    _ensure_petty()
+    conn = get_db()
+    only = request.args.get("emp","").strip()
+    if only:
+        names = [only]
+    else:
+        names = sorted({r["employee"] for r in qry(conn,"SELECT DISTINCT employee FROM petty_cash").fetchall()} |
+                       {r["added_by"] for r in qry(conn,"SELECT DISTINCT added_by FROM expenses WHERE petty_src='petty'").fetchall()})
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["SUMMARY"]); w.writerow(["Employee","Total Diye","Total Lagaye","Baqi"])
+    ledgers = []
+    for n in names:
+        st = _petty_status(conn, n)
+        w.writerow([n, round(st["given"],2), round(st["spent"],2), round(st["left"],2)])
+        gives = qry(conn,"SELECT * FROM petty_cash WHERE employee=%s",(n,)).fetchall()
+        exps = qry(conn,"""SELECT * FROM expenses WHERE added_by=%s AND
+            (petty_src='petty' OR (COALESCE(petty_src,'')='' AND %s IS NOT NULL AND date>=%s))""",(n, st["start"], st["start"])).fetchall()
+        items = [(g["date"] or "",0,g["id"],"give",g) for g in gives] + [(e["date"] or "",1,e["id"],"exp",e) for e in exps]
+        items.sort(key=lambda x:(x[0],x[1],x[2]))
+        ledgers.append((n, items))
+    conn.close()
+    w.writerow([]); w.writerow(["DETAIL"])
+    w.writerow(["Employee","Date","Type","Category","Detail","Paid To","Account","Diye (+)","Lagaye (-)","Balance"])
+    for n, items in ledgers:
+        bal = 0.0
+        for d, _, _, kind, r in items:
+            amt = float(r["amount"] or 0)
+            if kind == "give":
+                bal += amt
+                w.writerow([n, d, "Diye", "", r.get("note") or "", "", r.get("from_account") or "", round(amt,2), "", round(bal,2)])
+            else:
+                bal -= amt
+                w.writerow([n, d, "Kharcha", r.get("category") or "", r.get("description") or "", r.get("paid_to") or "",
+                            r.get("paid_from_account") or "", "", round(amt,2), round(bal,2)])
+    resp = Response("\ufeff"+out.getvalue(), mimetype="text/csv; charset=utf-8")
+    fname = f"petty_cash_{only.replace(' ','_')}.csv" if only else "petty_cash_all.csv"
+    resp.headers["Content-Disposition"] = f"attachment; filename={fname}"
+    return resp
